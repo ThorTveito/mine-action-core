@@ -1,0 +1,31 @@
+# Example Fly.io config for the live demo. See docs/DEPLOY.md.
+# Change `app` to a unique name. Secrets (never commit them):
+#   fly secrets set DATABASE_URL=... SECRET_KEY=... DEMO_PASSWORD=...
+app = "mine-action-core-demo"
+primary_region = "arn"
+
+[build]
+
+[env]
+  APP_ENV = "production"
+  DEMO_MODE = "true"      # create demo accounts and show them on the login form
+  SEED_ON_EMPTY = "true"  # load synthetic data on first boot
+  PORT = "8000"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/api/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

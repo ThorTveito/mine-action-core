@@ -23,7 +23,7 @@ from shapely.geometry import MultiPolygon, mapping, shape
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app import audit, geo, rules
+from app import audit, geo, rules, topology
 from app.config import get_settings
 from app.models import Hazard, HazardClass, HazardStatus, HazardType
 
@@ -257,11 +257,25 @@ def _check_spatial(
                 plan.warn("overlap", msg)
 
 
+def _check_topology(db: Session, plan: RowPlan) -> None:
+    """Per-polygon and near-miss topology findings, reported as warnings."""
+    assert plan.geom is not None
+    area, perimeter = geo.measures(db, plan.geom)
+    for f in topology.geometry_issues(plan.geom, area, perimeter):
+        plan.warn(f"topology_{f.rule}", f.message)
+    self_id = plan.hazard.id if plan.hazard is not None else None
+    for code, dist in topology.near_misses(db, plan.geom, topology.DEFAULT_GAP_TOLERANCE_M, self_id):
+        plan.warn(
+            "topology_gap", f"Near miss: {dist:.2f} m from {code} without touching (undershoot?)"
+        )
+
+
 def validate(
     db: Session,
     rows: list[RawRow],
     transformer: Transformer | None,
     reject_overlaps: bool = False,
+    can_release: bool = True,
 ) -> list[RowPlan]:
     plans: list[RowPlan] = []
     seen_codes: set[str] = set()
@@ -322,23 +336,27 @@ def validate(
 
         # 4. Status rules
         new_status = plan.values.get("status")
+        if new_status == HazardStatus.RELEASED and not can_release:
+            plan.error("forbidden", "Your role may not release hazards (needs qa_officer or admin)")
         if new_status is not None:
             if plan.action == "create":
                 if (msg := rules.check_initial_status(new_status)) is not None:
                     plan.error("invalid_transition", msg)
             elif plan.hazard is not None:
                 current = pending_status.get(plan.hazard.id, plan.hazard.status)
-                if (msg := rules.check_transition(current, new_status)) is not None:
+                if (msg := rules.check_transition(current, new_status)) is not None or (
+                    new_status == HazardStatus.RELEASED
+                    and current != HazardStatus.RELEASED
+                    and (msg := rules.check_release_preconditions(db, plan.hazard.id)) is not None
+                ):
                     plan.error("invalid_transition", msg)
-                elif new_status == HazardStatus.RELEASED and current != HazardStatus.RELEASED:
-                    if (msg := rules.check_release_preconditions(db, plan.hazard.id)) is not None:
-                        plan.error("invalid_transition", msg)
                 if plan.ok:
                     pending_status[plan.hazard.id] = new_status
 
         # 5. Duplicates and overlaps (only for geometrically valid rows)
         if plan.geom is not None and plan.ok:
             _check_spatial(db, plan, plans[:-1], reject_overlaps)
+            _check_topology(db, plan)
 
     return plans
 
@@ -346,7 +364,9 @@ def validate(
 # ----------------------------------------------------------------------------- apply
 
 
-def apply(db: Session, plans: list[RowPlan], import_id: uuid.UUID) -> tuple[int, int]:
+def apply(
+    db: Session, plans: list[RowPlan], import_id: uuid.UUID, actor: str = "system"
+) -> tuple[int, int]:
     """Write all accepted rows. Caller commits. Returns (created, updated)."""
     source = f"import:{import_id}"
     created = updated = 0
@@ -371,6 +391,7 @@ def apply(db: Session, plans: list[RowPlan], import_id: uuid.UUID) -> tuple[int,
                 "create",
                 audit.created_values({**values, "code": hazard.code, "area_m2": hazard.area_m2}),
                 source,
+                actor,
             )
             created += 1
         else:
@@ -385,6 +406,6 @@ def apply(db: Session, plans: list[RowPlan], import_id: uuid.UUID) -> tuple[int,
             for key, value in values.items():
                 setattr(hazard, key, value)
             if trail:
-                audit.record(db, "hazard", hazard.id, "update", trail, source)
+                audit.record(db, "hazard", hazard.id, "update", trail, source, actor)
             updated += 1
     return created, updated

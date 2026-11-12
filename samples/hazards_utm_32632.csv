@@ -1,0 +1,3 @@
+code,name,hazard_type,hazard_class,status,region,description,wkt
+,Ford Crossing (UTM 32N),SHA,anti_vehicle,,Eastern Uplands,"Surveyed with GNSS, UTM zone 32N","POLYGON((490485.7 6843001.7, 490697.1 6843001.1, 490698.3 6843446.7, 490486.9 6843447.3, 490485.7 6843001.7))"
+,Hill Orchard (UTM 32N),CHA,anti_personnel,confirmed,Eastern Uplands,"Surveyed with GNSS, UTM zone 32N","POLYGON((491548.3 6845226.8, 491759.6 6845226.3, 491760.7 6845671.9, 491549.4 6845672.4, 491548.3 6845226.8))"

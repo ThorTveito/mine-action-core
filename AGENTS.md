@@ -23,14 +23,23 @@ PostgreSQL/PostGIS, with a FastAPI backend and a React + MapLibre frontend.
 
 - **Tier 1 (done):** schema + migrations, synthetic seed, CRUD API for
   hazards/tasks/clearance records, map UI, Docker Compose, README.
-- **Tier 2 (done, current baseline):** CSV/GeoJSON import with validation
-  (geometry validity, CRS, duplicates, overlaps, status transitions, rejection
-  report), audit trail, progress dashboard.
-- **Tier 3:** role-based access, QA/QC workflow, exportable reports, free-tier
-  live-demo deployment, demo GIF, coverage badge.
+- **Tier 2 (done):** CSV/GeoJSON import with validation (geometry validity, CRS,
+  duplicates, overlaps, status transitions, rejection report), audit trail,
+  progress dashboard.
+- **Tier 3 (done, current baseline):** roles and permissions, QA/QC inspections
+  gating release, spatial (topology) checks, CSV/GeoJSON exports and reports,
+  3D terrain map, single-container deploy config, CI with a coverage floor.
+  *Not done:* a deployed live demo (needs the owner's accounts) and a demo GIF.
+- **Since Tier 3:** field reports from surveyors (offline outbox, triage into hazards),
+  login throttling, lazy-loaded tabs, mobile layout, error boundary.
 
-Do not build later-tier features early. If a task would materially change
-scope, ask first.
+Do not build features beyond the current tier early. If a task would materially
+change scope, ask first.
+
+**Naming:** "topology" in the code and API (`app/topology.py`, `/api/topology/*`)
+means *spatial integrity rules between polygons* (overlaps, gaps, slivers). The
+UI calls this "Spatial checks". The 3D *terrain* map (relief from elevation
+data) is a separate, frontend-only feature. Don't mix the two up.
 
 ## Repository layout
 
@@ -44,15 +53,27 @@ backend/            FastAPI app (Python 3.12)
   app/geo.py          GeoJSON <-> shapely <-> PostGIS helpers, validation
   app/rules.py        hazard status transitions + release preconditions
   app/audit.py        audit-trail helpers (record, diff)
+  app/security.py     scrypt password hashing, JWT tokens
+  app/auth.py         roles -> permissions, current-user dependencies
+  app/topology.py     spatial checks, adjacency, clusters (PostGIS + shapely)
   app/importer.py     import pipeline: parse -> validate -> apply
-  app/routers/        hazards, tasks, clearance, stats (+dashboard), imports, audit_log
+  app/bootstrap.py    demo users, first-boot seeding (used by the container)
+  app/routers/        hazards, tasks, clearance, qa, stats (+dashboard), imports,
+                      audit_log, auth_users, topology, exports, field_reports
   app/seed.py         deterministic synthetic data generator
   alembic/            migrations (hand-written, reviewed)
   tests/              pytest, runs against a real PostGIS database
 frontend/           Vite + React + TypeScript + MapLibre GL
-  src/MapPage.tsx, DashboardPage.tsx, ImportPage.tsx   one file per tab
+  src/MapPage.tsx, DashboardPage.tsx, TopologyPage.tsx, ImportPage.tsx   one per tab
+  src/HazardDetail.tsx  status change, QA inspections, spatial issues, history
+  src/MapView.tsx       MapLibre map incl. 3D terrain (raster-dem) and issue markers
+  src/AuthContext.tsx, auth.ts   login state, token storage, UI permission hints
+  src/FieldPage.tsx, outbox.ts   field report form, offline outbox, triage inbox
+  src/ErrorBoundary.tsx          per-tab crash containment
 samples/            demo import files (assume `make seed` data)
-docs/glossary.md    domain terms (keep in sync with code enums)
+docs/               glossary.md (keep in sync with enums), topology.md, field-reports.md, DEPLOY.md
+Dockerfile          single-container production image (API + built frontend)
+fly.toml, .github/workflows/ci.yml   deploy example and CI
 docker-compose.yml  db (PostGIS), backend, frontend
 Makefile            common commands
 ```
@@ -65,6 +86,9 @@ Everything runs in Docker; no local Postgres is required.
 make up        # start db, backend, frontend (http://localhost:5173, API :8000/docs)
 make seed      # (re)load synthetic data (idempotent: wipes and reseeds)
 make test      # backend pytest inside the container
+make coverage  # tests with a coverage report (CI floor is 90%)
+make lint      # ruff
+make image     # build the production Docker image
 make down      # stop; `make nuke` also deletes the database volume
 make logs      # tail logs
 cd frontend && npm run build   # typecheck + production build
@@ -97,6 +121,29 @@ cd frontend && npm run build   # typecheck + production build
 - Import pipeline: `validate` must never write to the DB (dry runs rely on it).
   Every problem is a stable `code` + readable message collected per row, so
   users get one complete report. Add new checks as codes, with tests.
+- **Permissions** live in `app/auth.py` (`ROLE_PERMISSIONS`). Reads are public;
+  every write endpoint takes `Depends(require(Permission.X))` or, where the
+  needed permission depends on the change (hazard PATCH), checks with `ensure`.
+  Data entry (editor) is deliberately separate from QA and release
+  (qa_officer); keep that separation. The frontend mirrors the matrix in
+  `src/auth.ts` as a UI hint only. The API is the authority, so update both.
+- Audit rows carry `actor` (username) as well as `source`. Pass the acting
+  user into `audit.record` and into `importer.apply`.
+- Release preconditions (`rules.check_release_preconditions`): a completed
+  clearance task, no open tasks, a **passing** latest QA inspection for every
+  completed clearance task, and no error-level spatial issues.
+- Spatial checks: thresholds are constants at the top of `app/topology.py` and
+  documented in `docs/topology.md`; change them together. Warnings never block;
+  errors block release.
+- Never commit secrets. `SECRET_KEY` must be set when `APP_ENV=production`
+  (the app refuses to start otherwise). Demo credentials exist only in demo mode.
+- CSV exports must pass text cells through `safe_cell` (formula injection).
+- Field reports: never make them public. Visibility goes through `_visible()` in
+  `routers/field_reports.py` (own reports for surveyors, all for VIEW_REPORTS); return 404
+  for reports a user may not see. Submissions must stay idempotent on `client_id`, because
+  the frontend outbox relies on blind retries.
+- Login throttling lives in `security.login_throttle` (in-memory, per process). Tests clear
+  it between runs.
 - Error responses use FastAPI `HTTPException` with a clear `detail` message.
 
 **Frontend**
@@ -105,6 +152,14 @@ cd frontend && npm run build   # typecheck + production build
   (Vite proxies it in dev).
 - Status colours are defined once (`src/status.ts`) and reused by map and
   legend.
+- Browser storage (`localStorage`) must be wrapped in try/catch (see `auth.ts`)
+  and the app must work without it.
+- Pages are lazy-loaded (`React.lazy` in `App.tsx`); keep heavy libraries out of the
+  initial chunk. Field UI must work on a 375 px wide phone (check it with the mobile preset):
+  44 px touch targets, 16 px inputs.
+- Network calls that a field user makes must survive being offline (see `outbox.ts`).
+- The 3D view uses MapLibre `raster-dem` terrain with free keyless AWS terrain
+  tiles (Terrarium encoding); keep the attribution string. No Mapbox/other keys.
 
 **General**
 - Use IMAS-style terminology consistently (see `docs/glossary.md`): hazard,
@@ -121,8 +176,13 @@ cd frontend && npm run build   # typecheck + production build
 - Every new endpoint needs: happy path, validation failure, not-found.
 - New import checks need a test per outcome (rejected with the right code,
   and a nearby valid case that is still accepted).
-- Tests truncate all tables between runs; if you add a table, add it to the
+- Tests truncate all data tables between runs (not `users`, which holds one
+  account per role for the whole session); if you add a table, add it to the
   TRUNCATE in `tests/conftest.py` and `seed._wipe`.
+- The default `client` fixture is logged in as admin. Use `as_role("editor")`,
+  `anon`, etc. when a test is about permissions.
+- Spatial tests build geometry from small degree boxes near lat 15; see the
+  comments in `tests/test_topology.py` for the metre equivalents.
 - Geometry validation changes need tests with invalid inputs (self-
   intersecting ring, out-of-range coordinates, wrong geometry type).
 - Before declaring work done: `make test` passes and
@@ -147,5 +207,9 @@ cd frontend && npm run build   # typecheck + production build
 - The seed bypasses the status rules on purpose (it writes final states directly).
 - The dev DB is published on host port **5440** (5433 was taken on the author's
   machine). Inside Compose it is always `db:5432`.
-- Seed coordinates are an arbitrary patch of real land, so the OSM basemap shows
-  real place names near fictional hazards. Known issue; see README limitations.
+- Seed coordinates are shifted onto real mountainous terrain (central Norway,
+  `SHIFT_LON/SHIFT_LAT` in `app/seed.py`) so the 3D view has relief. The country
+  and every hazard are fictional, but the OSM basemap shows real place names.
+  Sample files and the map's default centre follow the seed; regenerate samples
+  if you move it again. The seed must keep random hazards clear of each other so
+  the only spatial issues are the 12 deliberate cases (a test enforces this).

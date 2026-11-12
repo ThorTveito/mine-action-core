@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app import importer
+from app.auth import Permission, has_permission, require
 from app.db import get_db
+from app.models import User
 from app.schemas import ImportReport, IssueOut, RowReport
 
 router = APIRouter(prefix="/imports", tags=["imports"])
@@ -15,6 +17,7 @@ DbDep = Annotated[Session, Depends(get_db)]
 @router.post("/hazards", response_model=ImportReport)
 def import_hazards(
     db: DbDep,
+    user: Annotated[User, Depends(require(Permission.IMPORT))],
     file: UploadFile,
     source_crs: Annotated[str, Form()] = "EPSG:4326",
     dry_run: Annotated[bool, Form()] = True,
@@ -35,7 +38,9 @@ def import_hazards(
     except importer.ImportFileError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
-    plans = importer.validate(db, rows, transformer, reject_overlaps)
+    plans = importer.validate(
+        db, rows, transformer, reject_overlaps, has_permission(user, Permission.RELEASE)
+    )
     rejected = sum(1 for p in plans if not p.ok)
     import_id = uuid.uuid4()
 
@@ -43,7 +48,7 @@ def import_hazards(
     created = updated = 0
     can_commit = not dry_run and not (on_error == "abort" and rejected > 0)
     if can_commit:
-        created, updated = importer.apply(db, plans, import_id)
+        created, updated = importer.apply(db, plans, import_id, user.username)
         db.commit()
         committed = True
     else:

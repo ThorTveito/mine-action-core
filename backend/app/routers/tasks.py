@@ -5,9 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import audit
+from app.auth import Permission, require
 from app.config import get_settings
 from app.db import get_db
-from app.models import Hazard, Task, TaskStatus, TaskType
+from app.models import Hazard, Task, TaskStatus, TaskType, User
 from app.schemas import TaskCreate, TaskRead, TaskUpdate
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -46,7 +47,9 @@ def get_task(task_id: int, db: DbDep) -> Task:
 
 
 @router.post("", response_model=TaskRead, status_code=status.HTTP_201_CREATED)
-def create_task(payload: TaskCreate, db: DbDep) -> Task:
+def create_task(
+    payload: TaskCreate, db: DbDep, user: Annotated[User, Depends(require(Permission.WRITE))]
+) -> Task:
     if db.get(Hazard, payload.hazard_id) is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, detail=f"Hazard {payload.hazard_id} not found"
@@ -56,14 +59,26 @@ def create_task(payload: TaskCreate, db: DbDep) -> Task:
     db.add(task)
     db.flush()
     task.code = f"{get_settings().country_code}-TSK-{task.id:05d}"
-    audit.record(db, "task", task.id, "create", audit.created_values({**values, "code": task.code}))
+    audit.record(
+        db,
+        "task",
+        task.id,
+        "create",
+        audit.created_values({**values, "code": task.code}),
+        actor=user.username,
+    )
     db.commit()
     db.refresh(task)
     return task
 
 
 @router.patch("/{task_id}", response_model=TaskRead)
-def update_task(task_id: int, payload: TaskUpdate, db: DbDep) -> Task:
+def update_task(
+    task_id: int,
+    payload: TaskUpdate,
+    db: DbDep,
+    user: Annotated[User, Depends(require(Permission.WRITE))],
+) -> Task:
     task = _get_or_404(db, task_id)
     changes = payload.model_dump(exclude_unset=True)
     for field, value in changes.items():
@@ -82,16 +97,18 @@ def update_task(task_id: int, payload: TaskUpdate, db: DbDep) -> Task:
     for field, value in changes.items():
         setattr(task, field, value)
     if trail:
-        audit.record(db, "task", task.id, "update", trail)
+        audit.record(db, "task", task.id, "update", trail, actor=user.username)
     db.commit()
     db.refresh(task)
     return task
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_task(task_id: int, db: DbDep) -> Response:
+def delete_task(
+    task_id: int, db: DbDep, user: Annotated[User, Depends(require(Permission.DELETE))]
+) -> Response:
     task = _get_or_404(db, task_id)
-    audit.record(db, "task", task.id, "delete", {"code": [task.code, None]})
+    audit.record(db, "task", task.id, "delete", {"code": [task.code, None]}, actor=user.username)
     db.delete(task)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

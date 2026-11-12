@@ -1,0 +1,4 @@
+code,name,hazard_type,hazard_class,status,region,description,wkt
+,Thin strip beside Adjoining Field B,SHA,mixed,,Southern Plains,Accepted with a sliver warning and a near-miss warning,"POLYGON((8.65801 61.30000, 8.65803 61.30000, 8.65803 61.30400, 8.65801 61.30400, 8.65801 61.30000))"
+,Pin-prick,SHA,uxo,,Southern Plains,Accepted with a tiny-area warning,"POLYGON((8.80000 61.30000, 8.80002 61.30000, 8.80002 61.30002, 8.80000 61.30002, 8.80000 61.30000))"
+,Clean field,SHA,anti_personnel,,Southern Plains,Accepted without warnings,"POLYGON((8.85000 61.30000, 8.85400 61.30000, 8.85400 61.30400, 8.85000 61.30400, 8.85000 61.30000))"

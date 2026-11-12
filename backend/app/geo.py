@@ -61,3 +61,10 @@ def area_m2(db: Session, geom: MultiPolygon) -> float:
 
 def to_geojson(db_geom: Any) -> dict[str, Any]:
     return dict(mapping(to_shape(db_geom)))
+
+
+def measures(db: Session, geom: MultiPolygon) -> tuple[float, float]:
+    """Geodesic (area in m2, perimeter in m) of a geometry, computed by PostGIS."""
+    g = func.Geography(func.ST_GeomFromText(geom.wkt, SRID))
+    row = db.execute(select(cast(func.ST_Area(g), Float), cast(func.ST_Perimeter(g), Float))).one()
+    return float(row[0]), float(row[1])

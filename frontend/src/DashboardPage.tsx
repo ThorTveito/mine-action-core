@@ -138,6 +138,25 @@ export default function DashboardPage() {
         </table>
       </section>
 
+      <section className="card">
+        <h3>Reports and data exports</h3>
+        <p className="muted">Public downloads (CSV opens in Excel; formulas in text cells are neutralised).</p>
+        <div className="actions">
+          <a className="button" href="/api/reports/progress.csv" download>
+            Progress report by region (CSV)
+          </a>
+          <a className="button" href="/api/reports/clearance.csv" download>
+            Clearance records (CSV)
+          </a>
+          <a className="button" href="/api/exports/hazards.csv" download>
+            All hazards, re-importable (CSV)
+          </a>
+          <a className="button" href="/api/exports/hazards.geojson" download>
+            All hazards (GeoJSON)
+          </a>
+        </div>
+      </section>
+
       <div className="two-col">
         <section className="card">
           <h3>Area cleared per month</h3>

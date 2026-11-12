@@ -1,4 +1,4 @@
-.PHONY: up down nuke logs seed test
+.PHONY: up down nuke logs seed test coverage lint image
 
 up:
 	docker compose up -d --build
@@ -17,3 +17,12 @@ seed:
 
 test:
 	docker compose run --rm backend pytest -q
+
+coverage:
+	docker compose run --rm backend pytest -q --cov=app --cov-report=term-missing
+
+lint:
+	docker compose run --rm backend ruff check app tests
+
+image:
+	docker build -t mine-action-core .

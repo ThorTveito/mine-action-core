@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import audit
+from app.auth import Permission, require
 from app.db import get_db
-from app.models import ClearanceRecord, Task
+from app.models import ClearanceRecord, Task, User
 from app.schemas import ClearanceRecordCreate, ClearanceRecordRead
 
 router = APIRouter(prefix="/clearance-records", tags=["clearance"])
@@ -42,24 +43,42 @@ def get_record(record_id: int, db: DbDep) -> ClearanceRecord:
 
 
 @router.post("", response_model=ClearanceRecordRead, status_code=status.HTTP_201_CREATED)
-def create_record(payload: ClearanceRecordCreate, db: DbDep) -> ClearanceRecord:
+def create_record(
+    payload: ClearanceRecordCreate,
+    db: DbDep,
+    user: Annotated[User, Depends(require(Permission.WRITE))],
+) -> ClearanceRecord:
     if db.get(Task, payload.task_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Task {payload.task_id} not found")
     values = payload.model_dump()
     record = ClearanceRecord(**values)
     db.add(record)
     db.flush()
-    audit.record(db, "clearance_record", record.id, "create", audit.created_values(values))
+    audit.record(
+        db,
+        "clearance_record",
+        record.id,
+        "create",
+        audit.created_values(values),
+        actor=user.username,
+    )
     db.commit()
     db.refresh(record)
     return record
 
 
 @router.delete("/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_record(record_id: int, db: DbDep) -> Response:
+def delete_record(
+    record_id: int, db: DbDep, user: Annotated[User, Depends(require(Permission.DELETE))]
+) -> Response:
     record = _get_or_404(db, record_id)
     audit.record(
-        db, "clearance_record", record.id, "delete", {"task_id": [record.task_id, None]}
+        db,
+        "clearance_record",
+        record.id,
+        "delete",
+        {"task_id": [record.task_id, None]},
+        actor=user.username,
     )
     db.delete(record)
     db.commit()

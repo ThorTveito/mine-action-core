@@ -1,9 +1,17 @@
 """Business rules for hazard lifecycle. Used by the API and by the import pipeline."""
 
-from sqlalchemy import func, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from app.models import Hazard, HazardStatus, Task, TaskStatus, TaskType
+from app.models import (
+    Hazard,
+    HazardStatus,
+    InspectionOutcome,
+    QaInspection,
+    Task,
+    TaskStatus,
+    TaskType,
+)
 
 S = HazardStatus
 
@@ -38,17 +46,15 @@ def check_transition(old: HazardStatus, new: HazardStatus) -> str | None:
 
 
 def check_release_preconditions(db: Session, hazard_id: int) -> str | None:
-    """A hazard may be released only after clearance is finished and nothing is still open."""
-    completed_clearance = db.scalar(
-        select(func.count())
-        .select_from(Task)
-        .where(
+    """A hazard may be released only after clearance, QA sign-off and a clean topology."""
+    completed = db.scalars(
+        select(Task).where(
             Task.hazard_id == hazard_id,
             Task.task_type == TaskType.CLEARANCE,
             Task.status == TaskStatus.COMPLETED,
         )
-    )
-    if not completed_clearance:
+    ).all()
+    if not completed:
         return "Cannot release: the hazard has no completed clearance task"
     open_tasks = db.scalar(
         select(func.count())
@@ -57,6 +63,27 @@ def check_release_preconditions(db: Session, hazard_id: int) -> str | None:
     )
     if open_tasks:
         return f"Cannot release: {open_tasks} task(s) are still planned, active or suspended"
+
+    for task in completed:
+        latest = db.scalar(
+            select(QaInspection)
+            .where(QaInspection.task_id == task.id)
+            .order_by(desc(QaInspection.inspection_date), desc(QaInspection.id))
+            .limit(1)
+        )
+        if latest is None:
+            return f"Cannot release: clearance task {task.code} has no QA inspection"
+        if latest.outcome != InspectionOutcome.PASS:
+            return (
+                f"Cannot release: the latest inspection of {task.code} failed "
+                f"({latest.inspection_date.isoformat()}); re-clear and re-inspect"
+            )
+
+    from app import topology  # local import: topology depends on models only
+
+    errors = topology.blocking_errors(db, hazard_id)
+    if errors:
+        return "Cannot release: topology errors must be fixed first (" + "; ".join(errors) + ")"
     return None
 
 

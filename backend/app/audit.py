@@ -24,6 +24,7 @@ def record(
     action: str,
     changes: dict[str, Any] | None = None,
     source: str = "api",
+    actor: str = "system",
 ) -> None:
     db.add(
         AuditLog(
@@ -32,6 +33,7 @@ def record(
             action=action,
             changes=changes or {},
             source=source,
+            actor=actor,
         )
     )
 

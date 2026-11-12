@@ -14,7 +14,10 @@ def test_dashboard_empty(client: TestClient) -> None:
 def test_dashboard_progress_by_region_and_month(
     client: TestClient, hazard: dict, hazard_payload: dict
 ) -> None:
-    other = client.post("/api/hazards", json={**hazard_payload, "region": "River Delta"}).json()
+    far = {"type": "Polygon", "coordinates": [[[18.5, 15.0], [18.51, 15.0], [18.51, 15.01], [18.5, 15.01], [18.5, 15.0]]]}
+    other = client.post(
+        "/api/hazards", json={**hazard_payload, "region": "River Delta", "geometry": far}
+    ).json()
     release_hazard(client, hazard["id"], cleared=800, found=2)
 
     body = client.get("/api/dashboard").json()

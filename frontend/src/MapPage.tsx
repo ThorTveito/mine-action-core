@@ -1,135 +1,60 @@
-import { useEffect, useMemo, useState } from "react";
-import { fetchAudit, fetchHazards, fetchRecords, fetchStats, fetchTasks } from "./api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { fetchFieldReportsGeojson, fetchHazards, fetchStats, fetchTopology } from "./api";
+import { useAuth } from "./AuthContext";
+import HazardDetail from "./HazardDetail";
 import MapView from "./MapView";
 import { STATUS_COLOR, STATUS_LABEL, STATUS_ORDER } from "./status";
 import type {
-  AuditEntry,
-  ClearanceRecord,
   HazardCollection,
-  HazardProperties,
   HazardStatus,
+  MapFocus,
   Stats,
-  Task,
+  TopologyIssue,
 } from "./types";
-
 import { fmtArea } from "./format";
 
-interface TaskWithRecords extends Task {
-  records: ClearanceRecord[];
-}
-
-function HazardDetail({ hazard }: { hazard: HazardProperties }) {
-  const [tasks, setTasks] = useState<TaskWithRecords[] | null>(null);
-  const [history, setHistory] = useState<AuditEntry[] | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setHistory(null);
-    fetchAudit("hazard", hazard.id)
-      .then((h) => {
-        if (!cancelled) setHistory(h);
-      })
-      .catch(() => {
-        if (!cancelled) setHistory([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [hazard.id, hazard.status]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setTasks(null);
-    fetchTasks(hazard.id)
-      .then((list) =>
-        Promise.all(list.map(async (t) => ({ ...t, records: await fetchRecords(t.id) }))),
-      )
-      .then((full) => {
-        if (!cancelled) setTasks(full);
-      })
-      .catch(() => {
-        if (!cancelled) setTasks([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [hazard.id]);
-
-  return (
-    <section className="card">
-      <h2>{hazard.name}</h2>
-      <p className="muted">{hazard.code}</p>
-      <dl>
-        <dt>Status</dt>
-        <dd>
-          <span className="dot" style={{ background: STATUS_COLOR[hazard.status] }} />
-          {STATUS_LABEL[hazard.status]}
-        </dd>
-        <dt>Type</dt>
-        <dd>{hazard.hazard_type}</dd>
-        <dt>Class</dt>
-        <dd>{hazard.hazard_class.replace("_", " ")}</dd>
-        <dt>Region</dt>
-        <dd>{hazard.region}</dd>
-        <dt>Area</dt>
-        <dd>{fmtArea(hazard.area_m2)}</dd>
-      </dl>
-      <h3>Tasks</h3>
-      {tasks === null && <p className="muted">Loading…</p>}
-      {tasks?.length === 0 && <p className="muted">No tasks recorded.</p>}
-      {tasks?.map((t) => {
-        const cleared = t.records.reduce((sum, r) => sum + r.area_cleared_m2, 0);
-        return (
-          <div key={t.id} className="task">
-            <strong>{t.task_type}</strong> · {t.status}
-            <div className="muted">
-              {t.code} · {t.organisation}
-            </div>
-            {t.records.length > 0 && (
-              <div className="muted">
-                {t.records.length} records · {fmtArea(cleared)} cleared
-              </div>
-            )}
-          </div>
-        );
-      })}
-      <h3>History</h3>
-      {history === null && <p className="muted">Loading…</p>}
-      {history?.length === 0 && <p className="muted">No changes recorded.</p>}
-      {history?.map((entry) => (
-        <div key={entry.id} className="history">
-          <div>
-            <strong>{entry.action}</strong>
-            <span className="badge">{entry.source.startsWith("import:") ? "import" : entry.source}</span>
-            <span className="muted"> {new Date(entry.created_at).toLocaleString()}</span>
-          </div>
-          {entry.action === "update" &&
-            Object.entries(entry.changes).map(([field, [from, to]]) => (
-              <div key={field} className="muted">
-                {field}: {String(from)} → {String(to)}
-              </div>
-            ))}
-        </div>
-      ))}
-    </section>
-  );
-}
-
-export default function MapPage() {
+export default function MapPage({ focus }: { focus: MapFocus | null }) {
+  const { user, can } = useAuth();
+  const seesReports = can("report") || can("view_reports");
+  const [reports, setReports] = useState<GeoJSON.FeatureCollection | null>(null);
+  const [showReports, setShowReports] = useState(true);
   const [data, setData] = useState<HazardCollection | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [visible, setVisible] = useState<Set<HazardStatus>>(new Set(STATUS_ORDER));
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [showIssues, setShowIssues] = useState(false);
+  const [issues, setIssues] = useState<TopologyIssue[] | null>(null);
+  const [terrain3d, setTerrain3d] = useState(false);
+  const [exaggeration, setExaggeration] = useState(1.5);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     Promise.all([fetchHazards(), fetchStats()])
       .then(([h, s]) => {
         setData(h);
         setStats(s);
       })
       .catch((e: Error) => setError(e.message));
+    fetchTopology()
+      .then((r) => setIssues(r.issues))
+      .catch(() => setIssues(null));
   }, []);
+
+  useEffect(load, [load]);
+
+  useEffect(() => {
+    if (!seesReports) {
+      setReports(null);
+      return;
+    }
+    fetchFieldReportsGeojson()
+      .then(setReports)
+      .catch(() => setReports(null));
+  }, [seesReports, user]);
+
+  useEffect(() => {
+    if (focus?.hazardId !== undefined) setSelectedId(focus.hazardId);
+  }, [focus]);
 
   const selected = useMemo(
     () => data?.features.find((f) => f.properties.id === selectedId)?.properties ?? null,
@@ -144,14 +69,15 @@ export default function MapPage() {
       return next;
     });
 
+  const errorCount = issues?.filter((i) => i.severity === "error").length ?? 0;
+  const warningCount = issues?.filter((i) => i.severity === "warning").length ?? 0;
+
   return (
     <div className="layout">
       <aside className="sidebar">
         <header>
           <h1>Mine Action Core</h1>
-          <p className="muted">
-            IMSMA-inspired demo · synthetic data for the fictional country of Karvonia
-          </p>
+          <p className="muted">IMSMA-inspired demo · synthetic data for the fictional country of Karvonia</p>
         </header>
 
         {error && <p className="error">Could not load data: {error}</p>}
@@ -187,15 +113,61 @@ export default function MapPage() {
               <span className="muted count">{stats?.hazards_by_status[s] ?? ""}</span>
             </label>
           ))}
+          <label className="legend topo-toggle">
+            <input type="checkbox" checked={showIssues} onChange={(e) => setShowIssues(e.target.checked)} />
+            Spatial check issues
+            <span className="muted count">
+              {issues === null ? "" : `${errorCount} errors · ${warningCount} warnings`}
+            </span>
+          </label>
+          {seesReports && (
+            <label className="legend">
+              <input type="checkbox" checked={showReports} onChange={(e) => setShowReports(e.target.checked)} />
+              <span className="dot" style={{ background: "#7c3aed" }} />
+              Field reports
+              <span className="muted count">{reports ? reports.features.length : ""}</span>
+            </label>
+          )}
+        </section>
+
+        <section className="card">
+          <h3>Terrain</h3>
+          <label className="legend">
+            <input type="checkbox" checked={terrain3d} onChange={(e) => setTerrain3d(e.target.checked)} />
+            3D terrain and relief shading
+          </label>
+          {terrain3d && (
+            <label className="slider">
+              <span className="muted">Vertical exaggeration ×{exaggeration.toFixed(1)}</span>
+              <input
+                type="range"
+                min="1"
+                max="4"
+                step="0.5"
+                value={exaggeration}
+                onChange={(e) => setExaggeration(Number(e.target.value))}
+              />
+              <span className="muted">Drag with right mouse (or Ctrl + drag) to tilt and rotate.</span>
+            </label>
+          )}
         </section>
 
         {selected ? (
-          <HazardDetail hazard={selected} />
+          <HazardDetail hazard={selected} onChanged={load} />
         ) : (
           <p className="muted">Click a hazard on the map to see its details.</p>
         )}
       </aside>
-      <MapView data={data} visible={visible} selectedId={selectedId} onSelect={setSelectedId} />
+      <MapView
+        data={data}
+        visible={visible}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+        issues={showIssues ? issues : null}
+        focus={focus}
+        terrain={{ enabled: terrain3d, exaggeration }}
+        reports={showReports ? reports : null}
+      />
     </div>
   );
 }

@@ -3,7 +3,20 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models import HazardClass, HazardStatus, HazardType, TaskStatus, TaskType
+from app.models import (
+    FindingType,
+    HazardClass,
+    HazardStatus,
+    HazardType,
+    InspectionOutcome,
+    InspectionType,
+    ItemCategory,
+    ReportSource,
+    ReportStatus,
+    Role,
+    TaskStatus,
+    TaskType,
+)
 
 
 class HazardCreate(BaseModel):
@@ -136,6 +149,7 @@ class AuditRead(BaseModel):
     action: str
     changes: dict[str, Any]
     source: str
+    actor: str
     created_at: datetime
 
 
@@ -195,3 +209,226 @@ class Dashboard(BaseModel):
     tasks_by_status: dict[str, int]
     by_region: list[RegionProgress]
     monthly_clearance: list[MonthlyClearance]
+
+
+# ---- Tier 3: users, QA ---------------------------------------------------------------
+
+
+class UserRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    display_name: str
+    role: Role
+    is_active: bool
+
+
+class UserCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[a-z0-9._-]+$")
+    display_name: str = Field(min_length=1, max_length=120)
+    role: Role
+    password: str = Field(min_length=8, max_length=128)
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserRead
+
+
+class DemoUser(BaseModel):
+    username: str
+    role: Role
+
+
+class Meta(BaseModel):
+    demo_mode: bool
+    demo_password: str | None
+    demo_users: list[DemoUser]
+
+
+class QaInspectionCreate(BaseModel):
+    task_id: int
+    inspection_type: InspectionType = InspectionType.QA
+    inspection_date: date
+    sample_area_m2: float = Field(default=0.0, ge=0)
+    residual_items_found: int = Field(default=0, ge=0)
+    outcome: InspectionOutcome
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def _pass_means_no_residuals(self) -> Self:
+        if self.outcome == InspectionOutcome.PASS and self.residual_items_found > 0:
+            raise ValueError("An inspection that found residual items cannot pass")
+        return self
+
+
+class QaInspectionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    task_id: int
+    inspection_type: InspectionType
+    inspection_date: date
+    inspector: str
+    sample_area_m2: float
+    residual_items_found: int
+    outcome: InspectionOutcome
+    notes: str | None
+    created_at: datetime
+
+
+# ---- Tier 3: topology ----------------------------------------------------------------
+
+
+class TopologyIssue(BaseModel):
+    rule: str
+    severity: Literal["info", "warning", "error"]
+    message: str
+    hazard_ids: list[int]
+    hazard_codes: list[str]
+    location: dict[str, Any] | None
+    value: float | None
+
+
+class TopologyReport(BaseModel):
+    checked_hazards: int
+    issue_count: int
+    by_severity: dict[str, int]
+    by_rule: dict[str, int]
+    issues: list[TopologyIssue]
+
+
+class AdjacencyEdge(BaseModel):
+    a_id: int
+    a_code: str
+    b_id: int
+    b_code: str
+    shared_boundary_m: float
+
+
+class ClusterMember(BaseModel):
+    id: int
+    code: str
+    status: str
+    region: str
+
+
+class ClusterOut(BaseModel):
+    hazard_count: int
+    total_area_m2: float
+    shared_boundary_m: float
+    regions: list[str]
+    status_counts: dict[str, int]
+    members: list[ClusterMember]
+
+
+class TopologyClusters(BaseModel):
+    cluster_count: int
+    clustered_hazards: int
+    isolated_hazards: int
+    clusters: list[ClusterOut]
+
+
+# ---- Field reports ---------------------------------------------------------------------
+
+# Allow a little clock skew between field devices and the server.
+_FUTURE_TOLERANCE_MIN = 10
+
+
+class FieldReportCreate(BaseModel):
+    client_id: str = Field(
+        min_length=8,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9-]+$",
+        description="Generated on the device; resending the same id never creates a duplicate",
+    )
+    observed_at: datetime
+    finding_type: FindingType
+    item_category: ItemCategory | None = None
+    quantity: int | None = Field(default=None, ge=0, le=10_000)
+    source: ReportSource = ReportSource.DIRECT_OBSERVATION
+    description: str = Field(default="", max_length=2000)
+    lon: float = Field(ge=-180, le=180)
+    lat: float = Field(ge=-90, le=90)
+    gps_accuracy_m: float | None = Field(default=None, ge=0, le=10_000)
+    region: str | None = Field(default=None, max_length=80)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        from datetime import UTC, timedelta
+
+        observed = self.observed_at
+        if observed.tzinfo is None:  # treat naive device time as UTC
+            observed = observed.replace(tzinfo=UTC)
+            self.observed_at = observed
+        if observed > datetime.now(UTC) + timedelta(minutes=_FUTURE_TOLERANCE_MIN):
+            raise ValueError("observed_at is in the future; check the device clock")
+        if self.finding_type == FindingType.ITEM_FOUND:
+            if self.item_category is None:
+                raise ValueError("item_category is required when an item was found")
+            if not self.quantity:
+                raise ValueError("quantity must be at least 1 when an item was found")
+        return self
+
+
+class FieldReportRead(BaseModel):
+    id: int
+    code: str
+    client_id: str
+    reported_by: str
+    observed_at: datetime
+    received_at: datetime
+    finding_type: FindingType
+    item_category: ItemCategory | None
+    quantity: int | None
+    source: ReportSource
+    description: str
+    lon: float
+    lat: float
+    gps_accuracy_m: float | None
+    region: str | None
+    status: ReportStatus
+    reviewed_by: str | None
+    reviewed_at: datetime | None
+    review_note: str | None
+    hazard_id: int | None
+    hazard_code: str | None
+
+
+class NearbyHazard(BaseModel):
+    id: int
+    code: str
+    name: str
+    status: HazardStatus
+    region: str
+    distance_m: float
+    contains_point: bool
+
+
+class AcceptReport(BaseModel):
+    mode: Literal["new_hazard", "link"]
+    hazard_id: int | None = Field(default=None, description="Required when mode is 'link'")
+    radius_m: float = Field(
+        default=50, ge=5, le=2000, description="Size of the new suspected area around the point"
+    )
+    name: str | None = Field(default=None, max_length=120)
+    region: str | None = Field(default=None, max_length=80)
+    note: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _link_needs_hazard(self) -> Self:
+        if self.mode == "link" and self.hazard_id is None:
+            raise ValueError("hazard_id is required when mode is 'link'")
+        return self
+
+
+class RejectReport(BaseModel):
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+class ReportDecision(BaseModel):
+    report: FieldReportRead
+    hazard_id: int | None
+    warnings: list[str]

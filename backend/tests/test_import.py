@@ -204,3 +204,36 @@ def test_unusable_files_return_422(client: TestClient) -> None:
     assert upload(client, HEADER).status_code == 422  # no rows
     bad = client.post(URL, files={"file": ("h.geojson", "{not json", "application/json")})
     assert bad.status_code == 422
+
+
+def test_import_requires_the_import_permission(anon: TestClient, as_role) -> None:
+    body = HEADER + row("A", square_wkt(18.0, 15.0))
+    files = {"file": ("h.csv", body, "text/csv")}
+    assert anon.post(URL, files=files).status_code == 401
+    assert as_role("viewer").post(URL, files=files).status_code == 403
+    assert as_role("qa_officer").post(URL, files=files).status_code == 403
+    assert as_role("editor").post(URL, files=files).status_code == 200
+
+
+def test_editor_cannot_release_through_import(as_role, client: TestClient, hazard: dict) -> None:
+    from tests.helpers import prepare_for_release
+
+    prepare_for_release(client, hazard["id"])
+    csv_text = HEADER + f'{hazard["code"]},,,,released,,,\n'
+    editor_report = as_role("editor").post(
+        URL, files={"file": ("h.csv", csv_text, "text/csv")}
+    ).json()
+    assert "forbidden" in codes(editor_report, 1)
+    admin_report = upload(client, csv_text, dry_run=False).json()
+    assert admin_report["accepted"] == 1
+    assert client.get(f"/api/hazards/{hazard['id']}").json()["status"] == "released"
+
+
+def test_import_audit_records_the_actor(as_role, client: TestClient) -> None:
+    as_role("editor").post(
+        URL,
+        files={"file": ("h.csv", HEADER + row("A", square_wkt(18.0, 15.0)), "text/csv")},
+        data={"dry_run": "false"},
+    )
+    entry = client.get("/api/audit", params={"entity_type": "hazard"}).json()[0]
+    assert entry["actor"] == "editor" and entry["source"].startswith("import:")

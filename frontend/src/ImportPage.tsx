@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
 import { importHazards } from "./api";
+import { useAuth } from "./AuthContext";
 import type { ImportOptions, ImportReport, ImportRowReport } from "./types";
 
-const CRS_PRESETS = ["EPSG:4326", "EPSG:32634", "EPSG:3857"];
+const CRS_PRESETS = ["EPSG:4326", "EPSG:32632", "EPSG:32634", "EPSG:3857"];
 
 function csvEscape(value: string): string {
   return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
@@ -63,6 +64,8 @@ function RowLine({ row }: { row: ImportRowReport }) {
 }
 
 export default function ImportPage() {
+  const { user, can } = useAuth();
+  const allowed = can("import");
   const fileInput = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [opts, setOpts] = useState<Omit<ImportOptions, "dryRun">>({
@@ -108,6 +111,14 @@ export default function ImportPage() {
         hazard; rows without one create a new hazard. Try the files in <code>samples/</code>.
       </p>
 
+      {!allowed && (
+        <p className="notice">
+          {user
+            ? `Your role (${user.role}) may not import data. Log in as an editor or admin.`
+            : "Log in as an editor or admin to import data. Anyone can still read the map and reports."}
+        </p>
+      )}
+
       <section className="card form">
         <label>
           File
@@ -150,7 +161,7 @@ export default function ImportPage() {
           Reject rows that overlap other hazards (otherwise only warn)
         </label>
         <div className="actions">
-          <button className="primary" disabled={!file || busy} onClick={() => run(true)}>
+          <button className="primary" disabled={!file || busy || !allowed} onClick={() => run(true)}>
             {busy ? "Working…" : "Dry run"}
           </button>
         </div>
@@ -188,7 +199,7 @@ export default function ImportPage() {
             {report.dry_run && !report.committed && (
               <button
                 className="primary"
-                disabled={busy || report.accepted === 0 || blockedByAbort}
+                disabled={busy || !allowed || report.accepted === 0 || blockedByAbort}
                 onClick={() => run(false)}
                 title={blockedByAbort ? "Fix the rejected rows or switch to “Import the valid rows”" : undefined}
               >
