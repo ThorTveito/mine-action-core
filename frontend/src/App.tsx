@@ -62,7 +62,7 @@ function Shell() {
           <Suspense fallback={<div className="page"><p className="muted">Loading…</p></div>}>
             {tab === "map" && <MapPage focus={focus} />}
             {tab === "field" && <FieldPage key={user?.username ?? "anonymous"} onShow={showOnMap} />}
-            {tab === "dashboard" && <DashboardPage />}
+            {tab === "dashboard" && <DashboardPage onOpenChecks={() => setTab("topology")} />}
             {tab === "topology" && <TopologyPage onShow={showOnMap} />}
             {tab === "import" && <ImportPage />}
           </Suspense>

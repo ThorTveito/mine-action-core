@@ -10,7 +10,7 @@ export const STATUS_ORDER: HazardStatus[] = [
 ];
 
 export const STATUS_COLOR: Record<HazardStatus, string> = {
-  suspected: "#f2b01e",
+  suspected: "#c98d00",
   confirmed: "#d64545",
   in_clearance: "#3b82f6",
   released: "#2f9e60",

@@ -197,18 +197,78 @@ class MonthlyClearance(BaseModel):
     month: str  # YYYY-MM
     cleared_area_m2: float
     items_destroyed: int
+    items_found: int = 0
+
+
+class ClassBreakdown(BaseModel):
+    hazard_class: str
+    hazard_count: int
+    area_m2: float
+
+
+class OrganisationStats(BaseModel):
+    organisation: str
+    tasks: int
+    active_tasks: int
+    completed_tasks: int
+    cleared_area_m2: float
+    items_destroyed: int
+
+
+class QaSummary(BaseModel):
+    inspections: int
+    passed: int
+    failed: int
+    pass_rate: float | None  # percent, None when there are no inspections
+    residual_items: int
+
+
+class FieldReportSummary(BaseModel):
+    total: int
+    by_status: dict[str, int]
+    by_finding_type: dict[str, int]
+    median_review_hours: float | None
+
+
+class DataQuality(BaseModel):
+    errors: int
+    warnings: int
+    by_rule: dict[str, int]
+
+
+class ActivityItem(BaseModel):
+    at: datetime
+    entity_type: str
+    action: str
+    source: str  # api | import | seed | field report
+    summary: str
 
 
 class Dashboard(BaseModel):
+    region: str | None = None  # the filter applied, None for all regions
+    regions: list[str] = []  # every region, for the filter
+    hazard_count: int = 0
+    open_hazard_count: int = 0  # suspected + confirmed + in_clearance
     contaminated_area_m2: float  # all hazards except cancelled
     remaining_area_m2: float  # suspected + confirmed + in_clearance
     released_area_m2: float
     cancelled_area_m2: float
     release_percent: float
+    items_found: int = 0
+    items_destroyed: int = 0
     area_by_status: dict[str, float]
+    hazards_by_status: dict[str, int] = {}
+    hazards_by_class: list[ClassBreakdown] = []
     tasks_by_status: dict[str, int]
+    tasks_by_type: dict[str, int] = {}
     by_region: list[RegionProgress]
     monthly_clearance: list[MonthlyClearance]
+    organisations: list[OrganisationStats] = []
+    qa: QaSummary | None = None
+    # The sections below always cover all regions.
+    field_reports: FieldReportSummary | None = None
+    data_quality: DataQuality | None = None
+    recent_activity: list[ActivityItem] = []
 
 
 # ---- Tier 3: users, QA ---------------------------------------------------------------

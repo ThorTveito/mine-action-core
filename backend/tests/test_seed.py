@@ -101,3 +101,8 @@ def test_seed_field_reports_cover_every_review_path(seeded: TestClient) -> None:
                for h in seeded.get(f"/api/field-reports/{r['id']}/nearby").json())
     ]  # fmt: skip
     assert len(flagged) == 1 and flagged[0]["item_category"] == "uxo"
+
+
+def test_seed_dashboard_review_time_is_plausible(seeded: TestClient) -> None:
+    hours = seeded.get("/api/dashboard").json()["field_reports"]["median_review_hours"]
+    assert hours == 22.0  # reviewed a day after observation, received two hours after it

@@ -158,6 +158,9 @@ def test_accept_as_new_hazard_creates_a_suspected_area(surveyor: TestClient, cli
     assert decision["report"]["status"] == "accepted"
     assert decision["report"]["hazard_code"] == hazard["code"]
     assert decision["report"]["reviewed_by"] == "admin"
+    # The public hazard must not carry the report's free text or the reporter's name.
+    assert "Two mines" not in hazard["description"] and "surveyor" not in hazard["name"]
+    assert body["code"] in hazard["description"]
     audit = client.get("/api/audit", params={"entity_type": "hazard", "entity_id": hazard["id"]}).json()[0]
     assert audit["source"] == f"field_report:{body['code']}"
 

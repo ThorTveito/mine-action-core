@@ -82,9 +82,46 @@ export interface MonthlyClearance {
   month: string;
   cleared_area_m2: number;
   items_destroyed: number;
+  items_found: number;
+}
+
+export interface OrganisationStats {
+  organisation: string;
+  tasks: number;
+  active_tasks: number;
+  completed_tasks: number;
+  cleared_area_m2: number;
+  items_destroyed: number;
+}
+
+export interface ActivityItem {
+  at: string;
+  entity_type: string;
+  action: string;
+  source: string;
+  summary: string;
 }
 
 export interface Dashboard {
+  region: string | null;
+  regions: string[];
+  hazard_count: number;
+  open_hazard_count: number;
+  items_found: number;
+  items_destroyed: number;
+  hazards_by_status: Record<HazardStatus, number>;
+  hazards_by_class: { hazard_class: string; hazard_count: number; area_m2: number }[];
+  tasks_by_type: Record<TaskType, number>;
+  organisations: OrganisationStats[];
+  qa: { inspections: number; passed: number; failed: number; pass_rate: number | null; residual_items: number };
+  field_reports: {
+    total: number;
+    by_status: Record<string, number>;
+    by_finding_type: Record<string, number>;
+    median_review_hours: number | null;
+  };
+  data_quality: { errors: number; warnings: number; by_rule: Record<string, number> };
+  recent_activity: ActivityItem[];
   contaminated_area_m2: number;
   remaining_area_m2: number;
   released_area_m2: number;
@@ -218,6 +255,7 @@ export interface TopologyClusters {
 
 export interface MapFocus {
   hazardId?: number;
+  bounds?: [number, number, number, number]; // west, south, east, north: fit instead of fly
   lon?: number;
   lat?: number;
   nonce: number;

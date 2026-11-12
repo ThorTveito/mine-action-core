@@ -297,15 +297,13 @@ def _new_hazard_from_report(
     geom = geo.parse_polygonal_geojson(dict(mapping(shapely_wkt.loads(wkt))))
     region = payload.region or report.region or _nearest_region(db, point.x, point.y)
     hazard = Hazard(
-        name=payload.name or f"Reported by {report.reported_by} ({report.code})",
+        name=payload.name or f"Field report {report.code}",  # no names on public data
         hazard_type=HazardType.SHA,
         hazard_class=_CLASS_FOR_ITEM.get(report.item_category, HazardClass.MIXED),
         status=HazardStatus.SUSPECTED,
         region=region,
-        description=(
-            f"Created from field report {report.code}: {report.finding_type.value}. "
-            f"{report.description}"
-        ).strip(),
+        # Only a reference: the report's own text can name informants and stays private.
+        description=f"Created from field report {report.code} ({report.finding_type.value}).",
         geom=geo.to_db_geometry(geom),
         area_m2=geo.area_m2(db, geom),
     )

@@ -14,7 +14,7 @@ areas, the tasks assigned to them, the clearance work done and its QA, on a map 
 
 | Area | Highlights |
 |------|-----------|
-| **Map** | Hazards by status, **3D terrain with relief shading** (free elevation tiles, adjustable exaggeration), spatial-issue markers, per-hazard detail |
+| **Map** | Hazards by status, **3D terrain with relief shading**, spatial-issue and field-report markers, and a **searchable, sortable list of every item** (optionally only what is in view) that zooms to whatever you pick |
 | **Lifecycle** | `suspected → confirmed → in_clearance → released` (or `cancelled`), enforced identically by the API and the importer |
 | **QA/QC** | Inspections on clearance tasks; a hazard can only be released after a **passing** latest inspection, with no open tasks and no spatial errors |
 | **Field reports** | Surveyors register findings on a phone with GPS; reports queue **offline** and send themselves later without duplicates; IM staff triage them against nearby hazards into a new suspected area, a link, or a rejection ([docs/field-reports.md](docs/field-reports.md)) |
@@ -22,7 +22,7 @@ areas, the tasks assigned to them, the clearance work done and its QA, on a map 
 | **Import** | CSV (WKT) or GeoJSON, dry run by default, per-row rejection report, CRS reprojection, duplicate and overlap detection, role-aware |
 | **Spatial checks** | Overlaps, release conflicts, near-miss gaps, slivers, spikes, tiny areas; adjacency and contiguous clusters ([docs/topology.md](docs/topology.md)) |
 | **Audit trail** | Every create/update/delete with old and new values, source (`api`, `import:<id>`, `seed`) and **who** did it |
-| **Dashboard & reports** | Release progress by region, status and month; downloadable progress and clearance reports, re-importable hazard export (CSV/GeoJSON) |
+| **Dashboard & reports** | Public and filterable by region: release progress, land by status and threat type, clearance per month (with table view and a rough time-to-clear estimate), operators, QA pass rate, field report and data-quality summaries, recent activity; downloadable reports and re-importable exports |
 | **Ops** | One-container production image, Fly.io example, CI with lint, tests against PostGIS and a 90% coverage floor |
 
 ## Stack
@@ -104,6 +104,9 @@ Terminology is in [docs/glossary.md](docs/glossary.md).
   because adjacent hazards legitimately touch.
 - **Validation never writes.** `importer.validate` is side-effect free, which makes dry runs trustworthy.
 - **Reads public, writes authenticated.** Visitors can browse the demo; every change is attributable.
+- **Public means aggregates.** The public dashboard shows counts and areas only. Field report
+  text, report locations and user names never appear in public responses, including the audit
+  log and hazards created from reports (tests check this).
 - **Offline-first field capture.** Field reports get a device-generated id and the server treats
   repeats as the same report, so the outbox can retry blindly without duplicates.
 - **Small first load.** Each tab is lazy-loaded; the map engine (~800 kB) only downloads with the

@@ -272,6 +272,7 @@ def _add_report(
         client_id=f"seed-{day:02d}-{finding_type.value}",
         reported_by="surveyor",
         observed_at=observed,
+        received_at=observed + timedelta(hours=2),  # sent from the field a little later
         finding_type=finding_type,
         item_category=item,
         quantity=quantity,

@@ -67,3 +67,34 @@ def test_task_and_record_changes_are_audited(client: TestClient, hazard: dict) -
     assert [e["action"] for e in tasks] == ["update", "create"]
     assert tasks[0]["changes"] == {"status": ["planned", "active"]}
     assert _audit(client, entity_type="clearance_record", entity_id=rec["id"])[0]["action"] == "create"
+
+
+def test_private_history_is_hidden_from_the_public(anon: TestClient, client: TestClient, as_role) -> None:
+    report = as_role("surveyor").post(
+        "/api/field-reports",
+        json={
+            "client_id": "audit-0001",
+            "observed_at": "2026-01-01T10:00:00Z",
+            "finding_type": "other",
+            "lon": 18.3,
+            "lat": 15.3,
+        },
+    ).json()
+    client.post("/api/users", json={"username": "temp.user", "display_name": "T", "role": "viewer", "password": "long-enough-1"})
+    try:
+        public = {e["entity_type"] for e in anon.get("/api/audit").json()}
+        assert "field_report" not in public and "user" not in public
+        assert anon.get("/api/audit", params={"entity_type": "field_report", "entity_id": report["id"]}).json() == []
+        assert {e["entity_type"] for e in as_role("editor").get("/api/audit").json()} >= {"field_report"}
+        assert "user" not in {e["entity_type"] for e in as_role("editor").get("/api/audit").json()}
+        assert {"field_report", "user"} <= {e["entity_type"] for e in client.get("/api/audit").json()}
+        # A bad token is treated as anonymous, not as an error.
+        bad = anon.get("/api/audit", headers={"Authorization": "Bearer nonsense"})
+        assert bad.status_code == 200 and "field_report" not in {e["entity_type"] for e in bad.json()}
+    finally:
+        from app.db import SessionLocal
+        from app.models import User
+
+        with SessionLocal() as db:
+            db.query(User).filter_by(username="temp.user").delete()
+            db.commit()

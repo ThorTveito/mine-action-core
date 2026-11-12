@@ -13,6 +13,7 @@ interface Props {
   focus: MapFocus | null; // fly here when it changes
   terrain: TerrainSettings;
   reports: GeoJSON.FeatureCollection | null; // field reports; null hides the layer
+  onViewChange?: (bounds: [number, number, number, number]) => void;
 }
 
 export interface TerrainSettings {
@@ -39,7 +40,10 @@ export default function MapView({
   focus,
   terrain,
   reports,
+  onViewChange,
 }: Props) {
+  const onViewRef = useRef(onViewChange);
+  onViewRef.current = onViewChange;
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const loaded = useRef(false);
@@ -93,7 +97,7 @@ export default function MapView({
     });
     if (data && data.features.length > 0 && !fitted.current) {
       fitted.current = true;
-      if (focus?.lon !== undefined) return; // a focus request wins over fitting to all hazards
+      if (focus?.lon !== undefined || focus?.bounds) return; // a focus request wins
       const bounds = new maplibregl.LngLatBounds();
       for (const f of data.features) {
         for (const polygon of f.geometry.coordinates) {
@@ -125,6 +129,12 @@ export default function MapView({
       },
     });
     mapRef.current = map;
+    const reportView = () => {
+      const b = map.getBounds();
+      onViewRef.current?.([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+    };
+    map.on("moveend", reportView);
+    map.once("idle", reportView);
     map.addControl(
       new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }),
       "top-right",
@@ -263,7 +273,11 @@ export default function MapView({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (map && focus && focus.lon !== undefined && focus.lat !== undefined) {
+    if (!map || !focus) return;
+    if (focus.bounds) {
+      const [w, s, e, n] = focus.bounds;
+      map.fitBounds([[w, s], [e, n]], { padding: 80, maxZoom: 16, duration: 600 });
+    } else if (focus.lon !== undefined && focus.lat !== undefined) {
       map.flyTo({ center: [focus.lon, focus.lat], zoom: 16, duration: 600 });
     }
   }, [focus]);

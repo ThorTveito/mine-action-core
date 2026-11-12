@@ -73,7 +73,8 @@ export const fetchMeta = () => request<Meta>("/meta");
 // --- data
 export const fetchHazards = () => request<HazardCollection>("/hazards/geojson");
 export const fetchStats = () => request<Stats>("/stats");
-export const fetchDashboard = () => request<Dashboard>("/dashboard");
+export const fetchDashboard = (region?: string) =>
+  request<Dashboard>(`/dashboard${region ? `?region=${encodeURIComponent(region)}` : ""}`);
 export const fetchTasks = (hazardId: number) => request<Task[]>(`/tasks?hazard_id=${hazardId}`);
 export const fetchRecords = (taskId: number) =>
   request<ClearanceRecord[]>(`/clearance-records?task_id=${taskId}`);

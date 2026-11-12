@@ -70,6 +70,7 @@ frontend/           Vite + React + TypeScript + MapLibre GL
   src/AuthContext.tsx, auth.ts   login state, token storage, UI permission hints
   src/FieldPage.tsx, outbox.ts   field report form, offline outbox, triage inbox
   src/ErrorBoundary.tsx          per-tab crash containment
+  src/ItemList.tsx               map sidebar list: search, sort, in-view filter
 samples/            demo import files (assume `make seed` data)
 docs/               glossary.md (keep in sync with enums), topology.md, field-reports.md, DEPLOY.md
 Dockerfile          single-container production image (API + built frontend)
@@ -138,6 +139,10 @@ cd frontend && npm run build   # typecheck + production build
 - Never commit secrets. `SECRET_KEY` must be set when `APP_ENV=production`
   (the app refuses to start otherwise). Demo credentials exist only in demo mode.
 - CSV exports must pass text cells through `safe_cell` (formula injection).
+- Public endpoints (dashboard, audit log, hazards) must never expose field report text or
+  locations, or user names. The audit log hides `field_report`/`user` history from callers
+  without the matching permission (`routers/audit_log.py`); the dashboard returns
+  aggregates only. Hazards created from a report carry only the report code.
 - Field reports: never make them public. Visibility goes through `_visible()` in
   `routers/field_reports.py` (own reports for surveyors, all for VIEW_REPORTS); return 404
   for reports a user may not see. Submissions must stay idempotent on `client_id`, because
@@ -151,7 +156,9 @@ cd frontend && npm run build   # typecheck + production build
 - All API calls go through `src/api.ts` and use the relative `/api` prefix
   (Vite proxies it in dev).
 - Status colours are defined once (`src/status.ts`) and reused by map and
-  legend.
+  legend. Charts follow the dataviz rules: one y-axis per chart, single-series charts use
+  the neutral `SERIES` colour (never a status colour), continuous time axes (zero-fill
+  missing months), hover tooltips plus a table view, labels next to every colour.
 - Browser storage (`localStorage`) must be wrapped in try/catch (see `auth.ts`)
   and the app must work without it.
 - Pages are lazy-loaded (`React.lazy` in `App.tsx`); keep heavy libraries out of the

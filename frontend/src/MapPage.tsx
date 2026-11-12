@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchFieldReportsGeojson, fetchHazards, fetchStats, fetchTopology } from "./api";
 import { useAuth } from "./AuthContext";
 import HazardDetail from "./HazardDetail";
+import ItemList from "./ItemList";
 import MapView from "./MapView";
 import { STATUS_COLOR, STATUS_LABEL, STATUS_ORDER } from "./status";
 import type {
@@ -18,6 +19,8 @@ export default function MapPage({ focus }: { focus: MapFocus | null }) {
   const seesReports = can("report") || can("view_reports");
   const [reports, setReports] = useState<GeoJSON.FeatureCollection | null>(null);
   const [showReports, setShowReports] = useState(true);
+  const [mapFocus, setMapFocus] = useState<MapFocus | null>(focus);
+  const [view, setView] = useState<[number, number, number, number] | null>(null);
   const [data, setData] = useState<HazardCollection | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +57,13 @@ export default function MapPage({ focus }: { focus: MapFocus | null }) {
 
   useEffect(() => {
     if (focus?.hazardId !== undefined) setSelectedId(focus.hazardId);
+    setMapFocus(focus);
   }, [focus]);
+
+  const pick = useCallback((target: Omit<MapFocus, "nonce">) => {
+    if (target.hazardId !== undefined) setSelectedId(target.hazardId);
+    setMapFocus({ ...target, nonce: Date.now() });
+  }, []);
 
   const selected = useMemo(
     () => data?.features.find((f) => f.properties.id === selectedId)?.properties ?? null,
@@ -130,6 +139,25 @@ export default function MapPage({ focus }: { focus: MapFocus | null }) {
           )}
         </section>
 
+
+        {selected ? (
+          <>
+            <button className="link back" onClick={() => setSelectedId(null)}>
+              ← Back to the list
+            </button>
+            <HazardDetail hazard={selected} onChanged={load} />
+          </>
+        ) : (
+          <ItemList
+            hazards={data}
+            reports={seesReports ? reports : null}
+            visible={visible}
+            view={view}
+            selectedId={selectedId}
+            onPick={pick}
+          />
+        )}
+
         <section className="card">
           <h3>Terrain</h3>
           <label className="legend">
@@ -151,12 +179,6 @@ export default function MapPage({ focus }: { focus: MapFocus | null }) {
             </label>
           )}
         </section>
-
-        {selected ? (
-          <HazardDetail hazard={selected} onChanged={load} />
-        ) : (
-          <p className="muted">Click a hazard on the map to see its details.</p>
-        )}
       </aside>
       <MapView
         data={data}
@@ -164,7 +186,8 @@ export default function MapPage({ focus }: { focus: MapFocus | null }) {
         selectedId={selectedId}
         onSelect={setSelectedId}
         issues={showIssues ? issues : null}
-        focus={focus}
+        focus={mapFocus}
+        onViewChange={setView}
         terrain={{ enabled: terrain3d, exaggeration }}
         reports={showReports ? reports : null}
       />

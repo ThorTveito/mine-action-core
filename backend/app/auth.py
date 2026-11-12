@@ -74,6 +74,21 @@ def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+def get_optional_user(
+    db: DbDep, token: Annotated[str | None, Depends(oauth2_scheme)]
+) -> User | None:
+    """The logged-in user, or None for anonymous visitors (invalid tokens count as anonymous)."""
+    if not token:
+        return None
+    try:
+        return get_current_user(db, token)
+    except HTTPException:
+        return None
+
+
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]
+
+
 def require(permission: Permission) -> Callable[..., User]:
     """Dependency factory: the caller must be logged in and hold `permission`."""
 
