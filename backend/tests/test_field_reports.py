@@ -99,7 +99,9 @@ def test_who_may_submit(anon: TestClient, as_role) -> None:
 
 def test_submission_is_audited(surveyor: TestClient, client: TestClient) -> None:
     body = submit(surveyor)
-    entry = client.get("/api/audit", params={"entity_type": "field_report", "entity_id": body["id"]}).json()[0]
+    entry = client.get(
+        "/api/audit", params={"entity_type": "field_report", "entity_id": body["id"]}
+    ).json()[0]
     assert entry["actor"] == "surveyor" and entry["action"] == "create"
 
 
@@ -141,18 +143,27 @@ def test_nearby_lists_hazards_by_distance(surveyor: TestClient, client: TestClie
     nearby = client.get(f"{URL}/{body['id']}/nearby").json()
     assert [h["id"] for h in nearby] == [hazard["id"]]
     assert 90 < nearby[0]["distance_m"] < 125 and not nearby[0]["contains_point"]
-    assert far["id"] in [h["id"] for h in client.get(f"{URL}/{body['id']}/nearby", params={"radius_m": 10_000}).json()]
+    assert far["id"] in [
+        h["id"]
+        for h in client.get(f"{URL}/{body['id']}/nearby", params={"radius_m": 10_000}).json()
+    ]
     assert surveyor.get(f"{URL}/{body['id']}/nearby").status_code == 403
 
 
-def test_accept_as_new_hazard_creates_a_suspected_area(surveyor: TestClient, client: TestClient) -> None:
+def test_accept_as_new_hazard_creates_a_suspected_area(
+    surveyor: TestClient, client: TestClient
+) -> None:
     make_hazard(client, box_geojson(18.5, 15.0, 18.504, 15.004), region="River Delta")
     body = submit(surveyor, lon=18.51, lat=15.002, item_category="av_mine")
     res = client.post(f"{URL}/{body['id']}/accept", json={"mode": "new_hazard", "radius_m": 100})
     assert res.status_code == 200, res.text
     decision = res.json()
     hazard = client.get(f"/api/hazards/{decision['hazard_id']}").json()
-    assert (hazard["hazard_type"], hazard["status"], hazard["hazard_class"]) == ("SHA", "suspected", "anti_vehicle")
+    assert (hazard["hazard_type"], hazard["status"], hazard["hazard_class"]) == (
+        "SHA",
+        "suspected",
+        "anti_vehicle",
+    )
     assert hazard["region"] == "River Delta"  # taken from the nearest hazard
     assert 30_000 < hazard["area_m2"] < 31_500  # pi * 100^2, as a 32-sided polygon
     assert decision["report"]["status"] == "accepted"
@@ -161,14 +172,18 @@ def test_accept_as_new_hazard_creates_a_suspected_area(surveyor: TestClient, cli
     # The public hazard must not carry the report's free text or the reporter's name.
     assert "Two mines" not in hazard["description"] and "surveyor" not in hazard["name"]
     assert body["code"] in hazard["description"]
-    audit = client.get("/api/audit", params={"entity_type": "hazard", "entity_id": hazard["id"]}).json()[0]
+    audit = client.get(
+        "/api/audit", params={"entity_type": "hazard", "entity_id": hazard["id"]}
+    ).json()[0]
     assert audit["source"] == f"field_report:{body['code']}"
 
 
 def test_accept_warns_when_the_new_area_overlaps(surveyor: TestClient, client: TestClient) -> None:
     make_hazard(client, BOX)
     body = submit(surveyor, lon=18.0041, lat=15.002)  # just outside: a 100 m buffer overlaps
-    decision = client.post(f"{URL}/{body['id']}/accept", json={"mode": "new_hazard", "radius_m": 100}).json()
+    decision = client.post(
+        f"{URL}/{body['id']}/accept", json={"mode": "new_hazard", "radius_m": 100}
+    ).json()
     assert any("overlap" in w for w in decision["warnings"])
 
 
@@ -176,7 +191,8 @@ def test_accept_by_linking(surveyor: TestClient, client: TestClient) -> None:
     hazard = make_hazard(client, BOX)
     body = submit(surveyor, lon=18.002, lat=15.002)
     decision = client.post(
-        f"{URL}/{body['id']}/accept", json={"mode": "link", "hazard_id": hazard["id"], "note": "inside"}
+        f"{URL}/{body['id']}/accept",
+        json={"mode": "link", "hazard_id": hazard["id"], "note": "inside"},
     ).json()
     assert decision["hazard_id"] == hazard["id"] and decision["warnings"] == []
     assert decision["report"]["review_note"] == "inside"
@@ -189,7 +205,9 @@ def test_finding_inside_released_land_is_flagged(surveyor: TestClient, client: T
     body = submit(surveyor, lon=18.002, lat=15.002)
     nearby = client.get(f"{URL}/{body['id']}/nearby").json()[0]
     assert nearby["contains_point"] and nearby["status"] == "released"
-    decision = client.post(f"{URL}/{body['id']}/accept", json={"mode": "link", "hazard_id": hazard["id"]}).json()
+    decision = client.post(
+        f"{URL}/{body['id']}/accept", json={"mode": "link", "hazard_id": hazard["id"]}
+    ).json()
     assert "inside RELEASED hazard" in decision["warnings"][0]
 
 
@@ -197,12 +215,18 @@ def test_triage_rules(surveyor: TestClient, client: TestClient, as_role) -> None
     body = submit(surveyor)
     url = f"{URL}/{body['id']}"
     assert surveyor.post(f"{url}/reject", json={"reason": "mine"}).status_code == 403
-    assert as_role("qa_officer").post(f"{url}/reject", json={"reason": "not credible"}).status_code == 403
+    assert (
+        as_role("qa_officer").post(f"{url}/reject", json={"reason": "not credible"}).status_code
+        == 403
+    )
     assert client.post(f"{url}/accept", json={"mode": "link"}).status_code == 422
     assert client.post(f"{url}/accept", json={"mode": "link", "hazard_id": 999}).status_code == 404
     assert client.post(f"{url}/reject", json={"reason": "x"}).status_code == 422  # too short
     rejected = client.post(f"{url}/reject", json={"reason": "Duplicate of FR-1"}).json()
-    assert rejected["report"]["status"] == "rejected" and rejected["report"]["review_note"] == "Duplicate of FR-1"
+    assert (
+        rejected["report"]["status"] == "rejected"
+        and rejected["report"]["review_note"] == "Duplicate of FR-1"
+    )
     again = client.post(f"{url}/accept", json={"mode": "new_hazard"})
     assert again.status_code == 409 and "already rejected" in again.json()["detail"]
     assert surveyor.get(url).json()["status"] == "rejected"  # the reporter sees the outcome

@@ -4,6 +4,7 @@ from typing import Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models import (
+    AccidentActivity,
     FindingType,
     HazardClass,
     HazardStatus,
@@ -11,11 +12,14 @@ from app.models import (
     InspectionOutcome,
     InspectionType,
     ItemCategory,
+    ReleaseMethod,
     ReportSource,
     ReportStatus,
     Role,
+    Sex,
     TaskStatus,
     TaskType,
+    VictimOutcome,
 )
 
 
@@ -24,7 +28,12 @@ class HazardCreate(BaseModel):
     hazard_type: HazardType
     hazard_class: HazardClass
     status: HazardStatus = HazardStatus.SUSPECTED
-    region: str = Field(min_length=1, max_length=80)
+    region: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=80,
+        description="Omit to assign the administrative area that contains the hazard",
+    )
     description: str | None = None
     geometry: dict[str, Any] = Field(description="GeoJSON Polygon or MultiPolygon, EPSG:4326")
 
@@ -98,9 +107,12 @@ class TaskRead(BaseModel):
 
 
 class ClearanceRecordCreate(BaseModel):
+    """A land-release record. `release_method` follows the task type when omitted."""
+
     task_id: int
     record_date: date
-    area_cleared_m2: float = Field(default=0.0, ge=0)
+    area_cleared_m2: float = Field(default=0.0, ge=0, description="Area released, in m2")
+    release_method: ReleaseMethod | None = None
     items_found: int = Field(default=0, ge=0)
     items_destroyed: int = Field(default=0, ge=0)
     team: str = Field(min_length=1, max_length=80)
@@ -120,6 +132,7 @@ class ClearanceRecordRead(BaseModel):
     task_id: int
     record_date: date
     area_cleared_m2: float
+    release_method: ReleaseMethod
     items_found: int
     items_destroyed: int
     team: str
@@ -265,6 +278,11 @@ class Dashboard(BaseModel):
     monthly_clearance: list[MonthlyClearance]
     organisations: list[OrganisationStats] = []
     qa: QaSummary | None = None
+    outstanding_area_m2: float = 0.0  # open hazards minus land already released inside them
+    land_release: "LandRelease | None" = None
+    casualties: "Casualties | None" = None
+    risk_education: "RiskEducationSummary | None" = None
+    top_priorities: list["PriorityOut"] = []
     # The sections below always cover all regions.
     field_reports: FieldReportSummary | None = None
     data_quality: DataQuality | None = None
@@ -467,8 +485,15 @@ class NearbyHazard(BaseModel):
     contains_point: bool
 
 
+class VictimIn(BaseModel):
+    sex: Sex = Sex.UNKNOWN
+    age: int | None = Field(default=None, ge=0, le=120)
+    outcome: VictimOutcome
+    is_deminer: bool = False
+
+
 class AcceptReport(BaseModel):
-    mode: Literal["new_hazard", "link"]
+    mode: Literal["new_hazard", "link", "accident"]
     hazard_id: int | None = Field(default=None, description="Required when mode is 'link'")
     radius_m: float = Field(
         default=50, ge=5, le=2000, description="Size of the new suspected area around the point"
@@ -476,6 +501,9 @@ class AcceptReport(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     region: str | None = Field(default=None, max_length=80)
     note: str | None = Field(default=None, max_length=2000)
+    # mode "accident": the victims and what they were doing (no names are ever stored)
+    victims: list[VictimIn] = Field(default_factory=list, max_length=100)
+    activity: AccidentActivity = AccidentActivity.UNKNOWN
 
     @model_validator(mode="after")
     def _link_needs_hazard(self) -> Self:
@@ -492,3 +520,186 @@ class ReportDecision(BaseModel):
     report: FieldReportRead
     hazard_id: int | None
     warnings: list[str]
+    accident_id: int | None = None
+
+
+# ---- Accidents, victims, risk education, admin areas -------------------------------------
+
+
+class VictimOut(VictimIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+
+class AccidentCreate(BaseModel):
+    occurred_on: date
+    lon: float = Field(ge=-180, le=180)
+    lat: float = Field(ge=-90, le=90)
+    item_category: ItemCategory | None = None
+    activity: AccidentActivity = AccidentActivity.UNKNOWN
+    description: str = Field(default="", max_length=2000)
+    victims: list[VictimIn] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def _not_in_future(self) -> Self:
+        if self.occurred_on > date.today():
+            raise ValueError("occurred_on is in the future")
+        return self
+
+
+class AccidentRead(BaseModel):
+    id: int
+    code: str
+    occurred_on: date
+    lon: float
+    lat: float
+    region: str | None
+    item_category: ItemCategory | None
+    activity: AccidentActivity
+    description: str
+    hazard_id: int | None
+    hazard_code: str | None
+    field_report_id: int | None
+    recorded_by: str
+    killed: int
+    injured: int
+    victims: list[VictimOut]
+
+
+class RiskEducationCreate(BaseModel):
+    held_on: date
+    lon: float = Field(ge=-180, le=180)
+    lat: float = Field(ge=-90, le=90)
+    organisation: str = Field(min_length=1, max_length=80)
+    girls: int = Field(default=0, ge=0, le=100_000)
+    boys: int = Field(default=0, ge=0, le=100_000)
+    women: int = Field(default=0, ge=0, le=100_000)
+    men: int = Field(default=0, ge=0, le=100_000)
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _someone_attended(self) -> Self:
+        if self.girls + self.boys + self.women + self.men == 0:
+            raise ValueError("a session needs at least one participant")
+        if self.held_on > date.today():
+            raise ValueError("held_on is in the future")
+        return self
+
+
+class RiskEducationRead(BaseModel):
+    id: int
+    code: str
+    held_on: date
+    lon: float
+    lat: float
+    region: str | None
+    organisation: str
+    girls: int
+    boys: int
+    women: int
+    men: int
+    total: int
+    notes: str | None
+
+
+# ---- Analytics: land release, casualties, risk education, priorities, annual report ------
+
+
+class LandReleaseYear(BaseModel):
+    year: int
+    cancelled: float
+    reduced: float
+    cleared: float
+    items_destroyed: int
+
+
+class LandRelease(BaseModel):
+    cancelled_m2: float
+    reduced_m2: float
+    cleared_m2: float
+    total_m2: float
+    items_found: int
+    items_destroyed: int
+    by_year: list[LandReleaseYear]
+
+
+class CasualtyYear(BaseModel):
+    year: int
+    accidents: int
+    killed: int
+    injured: int
+
+
+class Casualties(BaseModel):
+    accidents: int
+    casualties: int
+    killed: int
+    injured: int
+    deminers: int
+    by_sex: dict[str, int]
+    by_age_group: dict[str, int]
+    sadd: dict[str, int]  # "<sex>_<child|adult|unknown>" -> count
+    by_activity: dict[str, int]
+    by_year: list[CasualtyYear]
+
+
+class EoreYear(BaseModel):
+    year: int
+    sessions: int
+    people: int
+
+
+class RiskEducationSummary(BaseModel):
+    sessions: int
+    girls: int
+    boys: int
+    women: int
+    men: int
+    total: int
+    by_year: list[EoreYear]
+
+
+class PriorityComponent(BaseModel):
+    factor: float
+    value: Any
+    points: float
+    why: str
+
+
+class PriorityOut(BaseModel):
+    rank: int
+    hazard_id: int
+    code: str
+    name: str
+    region: str
+    status: str
+    hazard_class: str
+    area_m2: float
+    score: float
+    components: dict[str, PriorityComponent]
+
+
+class RegionSnapshot(BaseModel):
+    region: str
+    open_hazards: int
+    outstanding_m2: float
+    cancelled_m2: float
+    reduced_m2: float
+    cleared_m2: float
+
+
+class AnnualReport(BaseModel):
+    year: int
+    country: str
+    generated_at: datetime
+    open_hazards: int
+    outstanding_m2: float
+    regions: list[RegionSnapshot]
+    land_release: LandRelease
+    casualties: Casualties
+    risk_education: RiskEducationSummary
+    qa: QaSummary
+
+
+Dashboard.model_rebuild()

@@ -12,14 +12,18 @@ from datetime import UTC, date, datetime, timedelta
 
 from geoalchemy2.shape import from_shape, to_shape
 from shapely.affinity import translate
-from shapely.geometry import Point, Polygon, box
+from shapely.geometry import MultiPoint, MultiPolygon, Point, Polygon, box
+from shapely.ops import voronoi_diagram
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app import audit, bootstrap, geo
+from app import audit, bootstrap, gazetteer, geo
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import (
+    Accident,
+    AccidentActivity,
+    AdminArea,
     ClearanceRecord,
     FieldReport,
     FindingType,
@@ -31,11 +35,16 @@ from app.models import (
     InspectionType,
     ItemCategory,
     QaInspection,
+    ReleaseMethod,
     ReportSource,
     ReportStatus,
+    RiskEducationSession,
+    Sex,
     Task,
     TaskStatus,
     TaskType,
+    Victim,
+    VictimOutcome,
 )
 
 # The layout below was designed around (18.0E, 15.0N). SHIFT_* moves everything onto
@@ -76,12 +85,18 @@ def _blob(rng: random.Random, lon: float, lat: float, radius_m: float) -> Polygo
     for i in range(n):
         angle = 2 * math.pi * i / n
         r = radius_m * rng.uniform(0.6, 1.1)
-        points.append((lon + r * math.cos(angle) / m_per_deg_lon, lat + r * math.sin(angle) / m_per_deg_lat))
+        points.append(
+            (lon + r * math.cos(angle) / m_per_deg_lon, lat + r * math.sin(angle) / m_per_deg_lat)
+        )
     return Polygon(points)
 
 
 def _wipe(db: Session) -> None:
-    db.execute(text("TRUNCATE audit_log, field_reports, qa_inspections, clearance_records, tasks, hazards RESTART IDENTITY CASCADE"))
+    db.execute(
+        text(
+            "TRUNCATE audit_log, victims, accidents, risk_education_sessions, field_reports, qa_inspections, clearance_records, tasks, hazards, admin_areas RESTART IDENTITY CASCADE"
+        )
+    )
 
 
 def _add_task(
@@ -164,32 +179,87 @@ def _add_qa(
     )
 
 
+def _move_records(db: Session, records_task: Task, ts_task: Task, share: float) -> date | None:
+    """Re-label the first `share` of a task's records as technical-survey reduction."""
+    db.flush()
+    records = sorted(records_task.records, key=lambda r: (r.record_date, r.id))
+    moved = records[: int(len(records) * share)]
+    for r in moved:
+        r.task_id = ts_task.id
+        r.release_method = ReleaseMethod.REDUCED
+    return moved[-1].record_date if moved else None
+
+
 def _add_lifecycle(
     db: Session,
     hazard: Hazard,
     status: HazardStatus,
     rng: random.Random,
     qa_rng: random.Random,
+    extra: random.Random,
 ) -> None:
-    """Tasks, records and QA that are consistent with the hazard's status."""
+    """Tasks, land-release records and QA consistent with the hazard's status.
+
+    `rng` draws are unchanged from earlier versions so hazard codes stay stable; everything
+    added later (technical survey, NTS cancellation) draws from `extra`.
+    """
     match status:
         case HazardStatus.SUSPECTED:
             if rng.random() < 0.5:
                 _add_task(db, hazard, TaskType.SURVEY, TaskStatus.PLANNED, rng)
         case HazardStatus.CONFIRMED:
             _add_task(db, hazard, TaskType.CLEARANCE, TaskStatus.PLANNED, rng)
+            if extra.random() < 0.3:
+                _add_task(db, hazard, TaskType.TECHNICAL_SURVEY, TaskStatus.PLANNED, extra)
         case HazardStatus.IN_CLEARANCE:
             task = _add_task(db, hazard, TaskType.CLEARANCE, TaskStatus.ACTIVE, rng)
             last = _add_records(db, task, hazard.area_m2, rng.uniform(0.15, 0.8), rng)
+            if extra.random() < 0.6:  # technical survey first reduced part of the area
+                ts = _add_task(db, hazard, TaskType.TECHNICAL_SURVEY, TaskStatus.COMPLETED, extra)
+                ts_last = _move_records(db, task, ts, extra.uniform(0.25, 0.5))
+                if ts_last:
+                    _add_qa(
+                        db,
+                        ts,
+                        ts_last + timedelta(days=1),
+                        InspectionOutcome.PASS,
+                        qa_rng,
+                        hazard.area_m2,
+                    )
             if qa_rng.random() < 0.3:  # a sampling inspection that found something
                 _add_qa(db, task, last, InspectionOutcome.FAIL, qa_rng, hazard.area_m2)
         case HazardStatus.RELEASED:
             task = _add_task(db, hazard, TaskType.CLEARANCE, TaskStatus.COMPLETED, rng)
             last = _add_records(db, task, hazard.area_m2, 1.0, rng)
             _add_task(db, hazard, TaskType.VERIFICATION, TaskStatus.COMPLETED, rng)
-            _add_qa(db, task, last + timedelta(days=2), InspectionOutcome.PASS, qa_rng, hazard.area_m2)
+            _add_qa(
+                db, task, last + timedelta(days=2), InspectionOutcome.PASS, qa_rng, hazard.area_m2
+            )
+            if extra.random() < 0.7:  # most were partly released by technical survey
+                ts = _add_task(db, hazard, TaskType.TECHNICAL_SURVEY, TaskStatus.COMPLETED, extra)
+                ts_last = _move_records(db, task, ts, extra.uniform(0.3, 0.6))
+                if ts_last:
+                    _add_qa(
+                        db,
+                        ts,
+                        ts_last + timedelta(days=1),
+                        InspectionOutcome.PASS,
+                        qa_rng,
+                        hazard.area_m2,
+                    )
         case HazardStatus.CANCELLED:
-            _add_task(db, hazard, TaskType.SURVEY, TaskStatus.COMPLETED, rng)
+            survey = _add_task(db, hazard, TaskType.SURVEY, TaskStatus.COMPLETED, rng)
+            day = (survey.planned_start or date(2025, 1, 1)) + timedelta(days=extra.randint(3, 20))
+            db.add(
+                ClearanceRecord(
+                    task_id=survey.id,
+                    record_date=day,
+                    area_cleared_m2=round(hazard.area_m2, 1),
+                    release_method=ReleaseMethod.CANCELLED,
+                    team=extra.choice(TEAMS),
+                    notes="Cancelled by non-technical survey: no evidence of contamination.",
+                )
+            )
 
 
 def _create_hazard(
@@ -207,7 +277,7 @@ def _create_hazard(
         hazard_type=HazardType.SHA if status == HazardStatus.SUSPECTED else HazardType.CHA,
         hazard_class=hazard_class,
         status=status,
-        region=region,
+        region=gazetteer.region_for(db, valid) if gazetteer.has_areas(db) else region,
         description=description,
         geom=geo.to_db_geometry(valid),
         area_m2=geo.area_m2(db, valid),
@@ -226,7 +296,9 @@ def _create_hazard(
     return hazard
 
 
-def _topology_scenarios(db: Session, rng: random.Random, qa_rng: random.Random) -> None:
+def _topology_scenarios(
+    db: Session, rng: random.Random, qa_rng: random.Random, extra: random.Random
+) -> None:
     """Deliberate spatial-check cases in an empty corner of Southern Plains (docs/topology.md)."""
     region, s = "Southern Plains", HazardStatus
     needle = Polygon(
@@ -252,7 +324,8 @@ def _topology_scenarios(db: Session, rng: random.Random, qa_rng: random.Random) 
     for name, hazard_class, status, geom, description in cases:
         geom = translate(geom, SHIFT_LON, SHIFT_LAT)
         hazard = _create_hazard(db, name, hazard_class, status, region, geom, description)
-        _add_lifecycle(db, hazard, status, rng, qa_rng)
+        _add_lifecycle(db, hazard, status, rng, qa_rng, extra)
+
 
 def _add_report(
     db: Session,
@@ -353,11 +426,126 @@ def _field_reports(db: Session) -> None:
     )  # fmt: skip
 
 
+def _admin_areas(db: Session) -> None:
+    """Six fictional first-level areas: Voronoi cells around the region centres, cut to a
+    rounded country outline so Karvonia is not a rectangle."""
+    centres = list(REGIONS.items())
+    outline = MultiPoint([c for _, c in centres]).convex_hull.buffer(0.32, quad_segs=6)
+    cells = voronoi_diagram(
+        MultiPoint([c for _, c in centres]), envelope=outline.envelope.buffer(1)
+    )
+    for i, (name, (lon, lat)) in enumerate(sorted(centres), start=1):
+        cell = next(c for c in cells.geoms if c.contains(Point(lon, lat)))
+        shape = cell.intersection(outline)
+        geom = shape if isinstance(shape, MultiPolygon) else MultiPolygon([shape])
+        db.add(AdminArea(name=name, code=f"KRV-{i:02d}", geom=from_shape(geom, srid=geo.SRID)))
+    db.flush()
+
+
+ACTIVITY_WEIGHTS = [
+    (AccidentActivity.FARMING, 30), (AccidentActivity.HERDING, 18), (AccidentActivity.COLLECTING, 14),
+    (AccidentActivity.TRAVELLING, 12), (AccidentActivity.PLAYING, 10), (AccidentActivity.HANDLING, 8),
+    (AccidentActivity.UNKNOWN, 8),
+]  # fmt: skip
+
+
+def _accidents(db: Session, rng: random.Random) -> None:
+    """About 30 accidents 2021-2026, clustered around a few confirmed hazards (hot spots)."""
+    from app.routers.casualties import nearest_hazard_id
+
+    hazards = db.scalars(select(Hazard).order_by(Hazard.id)).all()
+    # Hot spots among the random hazards (not the hand-made spatial-check cases).
+    open_ = [
+        h
+        for h in hazards[:HAZARD_COUNT]
+        if h.status in (HazardStatus.CONFIRMED, HazardStatus.IN_CLEARANCE)
+    ]
+    hot = rng.sample(open_, 5)
+    activities = [a for a, w in ACTIVITY_WEIGHTS for _ in range(w)]
+    for n in range(30):
+        base = to_shape((rng.choice(hot) if rng.random() < 0.7 else rng.choice(hazards)).geom)
+        c = base.representative_point()
+        point = Point(c.x + rng.uniform(-0.02, 0.02), c.y + rng.uniform(-0.01, 0.01))
+        day = date(2021, 1, 1) + timedelta(days=rng.randint(0, 2100))
+        victims = []
+        for _ in range(rng.choices([1, 2, 3, 4], weights=[60, 25, 10, 5])[0]):
+            child = rng.random() < 0.4
+            victims.append(
+                Victim(
+                    sex=rng.choices([Sex.MALE, Sex.FEMALE, Sex.UNKNOWN], weights=[70, 25, 5])[0],
+                    age=None
+                    if rng.random() < 0.08
+                    else (rng.randint(5, 17) if child else rng.randint(18, 70)),
+                    outcome=VictimOutcome.KILLED if rng.random() < 0.3 else VictimOutcome.INJURED,
+                )
+            )
+        accident = Accident(
+            occurred_on=day,
+            location=from_shape(point, srid=geo.SRID),
+            region=gazetteer.area_for(db, point),
+            item_category=rng.choice([ItemCategory.AP_MINE, ItemCategory.AP_MINE, ItemCategory.UXO, ItemCategory.AV_MINE, ItemCategory.SUBMUNITION]),
+            activity=rng.choice(activities),
+            description="Synthetic accident record.",
+            hazard_id=nearest_hazard_id(db, point.x, point.y),
+            recorded_by="editor",
+            victims=victims,
+        )  # fmt: skip
+        db.add(accident)
+        db.flush()
+        accident.code = f"{get_settings().country_code}-ACC-{accident.id:05d}"
+    # One demining accident: deminer casualties are reported separately.
+    h = hot[0]
+    c = to_shape(h.geom).representative_point()
+    db.add(
+        Accident(
+            code=None,
+            occurred_on=date(2025, 6, 14),
+            location=from_shape(c, srid=geo.SRID),
+            region=gazetteer.area_for(db, c),
+            item_category=ItemCategory.AP_MINE,
+            activity=AccidentActivity.DEMINING,
+            description="Deminer injured during manual clearance (synthetic).",
+            hazard_id=h.id,
+            recorded_by="editor",
+            victims=[Victim(sex=Sex.MALE, age=34, outcome=VictimOutcome.INJURED, is_deminer=True)],
+        )
+    )
+    db.flush()
+    for a in db.scalars(select(Accident).where(Accident.code.is_(None))):
+        a.code = f"{get_settings().country_code}-ACC-{a.id:05d}"
+
+
+def _risk_education(db: Session, rng: random.Random) -> None:
+    """About 45 EORE sessions 2023-2026 in villages near contaminated areas."""
+    hazards = db.scalars(select(Hazard).order_by(Hazard.id)).all()
+    for _ in range(45):
+        c = to_shape(rng.choice(hazards).geom).representative_point()
+        point = Point(c.x + rng.uniform(-0.03, 0.03), c.y + rng.uniform(-0.015, 0.015))
+        school = rng.random() < 0.4
+        session = RiskEducationSession(
+            held_on=date(2023, 1, 1) + timedelta(days=rng.randint(0, 1380)),
+            location=from_shape(point, srid=geo.SRID),
+            region=gazetteer.area_for(db, point),
+            organisation=rng.choice(ORGANISATIONS),
+            girls=rng.randint(10, 45) if school else rng.randint(0, 12),
+            boys=rng.randint(10, 45) if school else rng.randint(0, 12),
+            women=rng.randint(0, 6) if school else rng.randint(5, 30),
+            men=rng.randint(0, 6) if school else rng.randint(5, 35),
+            notes="School session" if school else "Community session",
+            recorded_by="editor",
+        )
+        db.add(session)
+        db.flush()
+        session.code = f"{get_settings().country_code}-EORE-{session.id:05d}"
+
+
 def seed(db: Session) -> None:
     rng = random.Random(42)
     retry_rng = random.Random(7)  # only used to relocate a blob that would collide
     qa_rng = random.Random(43)  # separate stream so QA data never shifts the hazards
+    extra = random.Random(44)  # technical survey and NTS data added later
     _wipe(db)
+    _admin_areas(db)
     statuses = [s for s, w in STATUS_WEIGHTS for _ in range(w)]
     placed: list[Polygon] = []
 
@@ -384,10 +572,12 @@ def seed(db: Session) -> None:
             region=region,
             geom=shape,
         )
-        _add_lifecycle(db, hazard, status, rng, qa_rng)
+        _add_lifecycle(db, hazard, status, rng, qa_rng, extra)
 
-    _topology_scenarios(db, rng, qa_rng)
+    _topology_scenarios(db, rng, qa_rng, extra)
     _field_reports(db)
+    _accidents(db, random.Random(45))
+    _risk_education(db, random.Random(46))
     db.commit()
     bootstrap.ensure_demo_users(db)
 
@@ -395,4 +585,7 @@ def seed(db: Session) -> None:
 if __name__ == "__main__":
     with SessionLocal() as session:
         seed(session)
-        print(f"Seeded {HAZARD_COUNT} synthetic hazards plus topology test cases and demo users.")
+        print(
+            f"Seeded {HAZARD_COUNT} hazards, 12 spatial-check cases, admin areas, field reports,"
+            " accidents, risk education sessions and demo users."
+        )

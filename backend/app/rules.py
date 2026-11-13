@@ -29,6 +29,9 @@ INITIAL_STATUSES = frozenset({S.SUSPECTED, S.CONFIRMED})
 
 _OPEN_TASK_STATUSES = (TaskStatus.PLANNED, TaskStatus.ACTIVE, TaskStatus.SUSPENDED)
 
+# Tasks whose output must pass QA before land can be released (IMAS: TS and clearance).
+QA_TASK_TYPES = (TaskType.CLEARANCE, TaskType.TECHNICAL_SURVEY)
+
 
 def check_initial_status(status: HazardStatus) -> str | None:
     if status in INITIAL_STATUSES:
@@ -50,12 +53,12 @@ def check_release_preconditions(db: Session, hazard_id: int) -> str | None:
     completed = db.scalars(
         select(Task).where(
             Task.hazard_id == hazard_id,
-            Task.task_type == TaskType.CLEARANCE,
+            Task.task_type.in_(QA_TASK_TYPES),
             Task.status == TaskStatus.COMPLETED,
         )
     ).all()
     if not completed:
-        return "Cannot release: the hazard has no completed clearance task"
+        return "Cannot release: the hazard has no completed clearance or technical survey task"
     open_tasks = db.scalar(
         select(func.count())
         .select_from(Task)
@@ -72,7 +75,7 @@ def check_release_preconditions(db: Session, hazard_id: int) -> str | None:
             .limit(1)
         )
         if latest is None:
-            return f"Cannot release: clearance task {task.code} has no QA inspection"
+            return f"Cannot release: {task.task_type.value} task {task.code} has no QA inspection"
         if latest.outcome != InspectionOutcome.PASS:
             return (
                 f"Cannot release: the latest inspection of {task.code} failed "

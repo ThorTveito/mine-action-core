@@ -23,7 +23,7 @@ from shapely.geometry import MultiPolygon, mapping, shape
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app import audit, geo, rules, topology
+from app import audit, gazetteer, geo, rules, topology
 from app.config import get_settings
 from app.models import Hazard, HazardClass, HazardStatus, HazardType
 
@@ -33,7 +33,7 @@ DUPLICATE_IOU = 0.90  # intersection-over-union at or above this = same hazard
 OVERLAP_WARN = 0.10  # share of the smaller polygon covered by another hazard
 
 FIELDS = ("code", "name", "hazard_type", "hazard_class", "status", "region", "description")
-REQUIRED_ON_CREATE = ("name", "hazard_type", "hazard_class", "region")
+REQUIRED_ON_CREATE = ("name", "hazard_type", "hazard_class")  # region: from the gazetteer
 
 
 class ImportFileError(ValueError):
@@ -155,9 +155,7 @@ def _parse_geojson(content: str) -> list[RawRow]:
     for i, feature in enumerate(features, start=1):
         props = feature.get("properties") if isinstance(feature, dict) else None
         props = props if isinstance(props, dict) else {}
-        fields = {
-            k: "" if props.get(k) is None else str(props[k]).strip() for k in FIELDS
-        }
+        fields = {k: "" if props.get(k) is None else str(props[k]).strip() for k in FIELDS}
         geometry = feature.get("geometry") if isinstance(feature, dict) else None
         rows.append(RawRow(i, fields, geometry))
     return rows
@@ -180,9 +178,7 @@ def _parse_enum(raw: str, cls: type, name: str, plan: RowPlan, upper: bool = Fal
         return None
 
 
-def _to_geometry(
-    raw: dict[str, Any] | str, transformer: Transformer | None
-) -> MultiPolygon:
+def _to_geometry(raw: dict[str, Any] | str, transformer: Transformer | None) -> MultiPolygon:
     try:
         parsed = shape(raw) if isinstance(raw, dict) else shapely_wkt.loads(raw)
     except Exception as exc:
@@ -264,7 +260,9 @@ def _check_topology(db: Session, plan: RowPlan) -> None:
     for f in topology.geometry_issues(plan.geom, area, perimeter):
         plan.warn(f"topology_{f.rule}", f.message)
     self_id = plan.hazard.id if plan.hazard is not None else None
-    for code, dist in topology.near_misses(db, plan.geom, topology.DEFAULT_GAP_TOLERANCE_M, self_id):
+    for code, dist in topology.near_misses(
+        db, plan.geom, topology.DEFAULT_GAP_TOLERANCE_M, self_id
+    ):
         plan.warn(
             "topology_gap", f"Near miss: {dist:.2f} m from {code} without touching (undershoot?)"
         )
@@ -312,9 +310,13 @@ def validate(
         if f["description"]:
             values["description"] = f["description"]
         if f["hazard_type"]:
-            values["hazard_type"] = _parse_enum(f["hazard_type"], HazardType, "hazard_type", plan, True)
+            values["hazard_type"] = _parse_enum(
+                f["hazard_type"], HazardType, "hazard_type", plan, True
+            )
         if f["hazard_class"]:
-            values["hazard_class"] = _parse_enum(f["hazard_class"], HazardClass, "hazard_class", plan)
+            values["hazard_class"] = _parse_enum(
+                f["hazard_class"], HazardClass, "hazard_class", plan
+            )
         if f["status"]:
             values["status"] = _parse_enum(f["status"], HazardStatus, "status", plan)
         elif plan.action == "create":
@@ -331,7 +333,9 @@ def validate(
             except geo.GeometryError as exc:
                 message = str(exc)
                 if exc.code == "coordinates_out_of_range":
-                    message += ". If the data is in a projected CRS, set the source CRS (e.g. EPSG:32634)"
+                    message += (
+                        ". If the data is in a projected CRS, set the source CRS (e.g. EPSG:32634)"
+                    )
                 plan.error(exc.code, message)
 
         # 4. Status rules
@@ -376,6 +380,7 @@ def apply(
         values = dict(plan.values)
         if plan.action == "create":
             assert plan.geom is not None
+            values["region"] = gazetteer.region_for(db, plan.geom, values.get("region"))
             hazard = Hazard(
                 **values,
                 geom=geo.to_db_geometry(plan.geom),

@@ -72,7 +72,10 @@ def test_patch_rejects_null_required_field_and_bad_geometry(
 ) -> None:
     url = f"/api/hazards/{hazard['id']}"
     assert client.patch(url, json={"name": None}).status_code == 422
-    assert client.patch(url, json={"geometry": {"type": "Point", "coordinates": [1, 1]}}).status_code == 422
+    assert (
+        client.patch(url, json={"geometry": {"type": "Point", "coordinates": [1, 1]}}).status_code
+        == 422
+    )
     assert client.patch("/api/hazards/9999", json={"status": "confirmed"}).status_code == 404
 
 

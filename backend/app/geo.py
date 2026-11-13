@@ -53,9 +53,7 @@ def to_db_geometry(geom: MultiPolygon) -> Any:
 
 def area_m2(db: Session, geom: MultiPolygon) -> float:
     """Geodesic area in square metres, computed by PostGIS on the spheroid."""
-    stmt = select(
-        cast(func.ST_Area(func.Geography(func.ST_GeomFromText(geom.wkt, SRID))), Float)
-    )
+    stmt = select(cast(func.ST_Area(func.Geography(func.ST_GeomFromText(geom.wkt, SRID))), Float))
     return float(db.execute(stmt).scalar_one())
 
 

@@ -42,9 +42,26 @@ class HazardStatus(StrEnum):
 
 
 class TaskType(StrEnum):
-    SURVEY = "survey"
-    CLEARANCE = "clearance"
+    SURVEY = "survey"  # non-technical survey (NTS): may cancel land
+    TECHNICAL_SURVEY = "technical_survey"  # TS: may reduce land
+    CLEARANCE = "clearance"  # clears land
     VERIFICATION = "verification"
+
+
+class ReleaseMethod(StrEnum):
+    """How land was released (IMAS land release): by NTS, by TS, or by clearance."""
+
+    CANCELLED = "cancelled"
+    REDUCED = "reduced"
+    CLEARED = "cleared"
+
+
+# Which release method each kind of task produces. Verification releases nothing.
+RELEASE_METHOD_FOR_TASK: dict["TaskType", ReleaseMethod] = {
+    TaskType.SURVEY: ReleaseMethod.CANCELLED,
+    TaskType.TECHNICAL_SURVEY: ReleaseMethod.REDUCED,
+    TaskType.CLEARANCE: ReleaseMethod.CLEARED,
+}
 
 
 class TaskStatus(StrEnum):
@@ -93,6 +110,31 @@ class ReportSource(StrEnum):
     DIRECT_OBSERVATION = "direct_observation"
     LOCAL_INFORMANT = "local_informant"
     AUTHORITY = "authority"
+
+
+class AccidentActivity(StrEnum):
+    """What the victims were doing (helps target risk education)."""
+
+    FARMING = "farming"
+    HERDING = "herding"
+    TRAVELLING = "travelling"
+    COLLECTING = "collecting"  # wood, food, scrap metal
+    PLAYING = "playing"
+    HANDLING = "handling"  # tampering with an item
+    DEMINING = "demining"
+    OTHER = "other"
+    UNKNOWN = "unknown"
+
+
+class Sex(StrEnum):
+    FEMALE = "female"
+    MALE = "male"
+    UNKNOWN = "unknown"
+
+
+class VictimOutcome(StrEnum):
+    KILLED = "killed"
+    INJURED = "injured"
 
 
 class ReportStatus(StrEnum):
@@ -189,6 +231,8 @@ class AuditLog(Base):
 
 
 class ClearanceRecord(Base):
+    """A dated land-release record under a task: area released (by its method) and items."""
+
     __tablename__ = "clearance_records"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -197,6 +241,9 @@ class ClearanceRecord(Base):
     area_cleared_m2: Mapped[float] = mapped_column(Float, default=0.0)
     items_found: Mapped[int] = mapped_column(Integer, default=0)
     items_destroyed: Mapped[int] = mapped_column(Integer, default=0)
+    release_method: Mapped[ReleaseMethod] = mapped_column(
+        _enum(ReleaseMethod, "release_method"), default=ReleaseMethod.CLEARED
+    )
     team: Mapped[str] = mapped_column(String(80))
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -230,7 +277,9 @@ class QaInspection(Base):
     inspector: Mapped[str] = mapped_column(String(64))
     sample_area_m2: Mapped[float] = mapped_column(Float, default=0.0)
     residual_items_found: Mapped[int] = mapped_column(Integer, default=0)
-    outcome: Mapped[InspectionOutcome] = mapped_column(_enum(InspectionOutcome, "inspection_outcome"))
+    outcome: Mapped[InspectionOutcome] = mapped_column(
+        _enum(InspectionOutcome, "inspection_outcome")
+    )
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -248,7 +297,9 @@ class FieldReport(Base):
     client_id: Mapped[str] = mapped_column(String(64), unique=True)  # idempotent offline resend
     reported_by: Mapped[str] = mapped_column(String(64))
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     finding_type: Mapped[FindingType] = mapped_column(_enum(FindingType, "finding_type"))
     item_category: Mapped[ItemCategory | None] = mapped_column(_enum(ItemCategory, "item_category"))
     quantity: Mapped[int | None] = mapped_column(Integer)
@@ -266,3 +317,76 @@ class FieldReport(Base):
     hazard_id: Mapped[int | None] = mapped_column(ForeignKey("hazards.id", ondelete="SET NULL"))
 
     hazard: Mapped[Hazard | None] = relationship()
+
+
+class AdminArea(Base):
+    """First-level administrative area (the gazetteer). Hazards are assigned spatially."""
+
+    __tablename__ = "admin_areas"
+    __table_args__ = (Index("ix_admin_areas_geom", "geom", postgresql_using="gist"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), unique=True)
+    code: Mapped[str] = mapped_column(String(16), unique=True)
+    geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326, spatial_index=False))
+
+
+class Accident(Base):
+    """An explosive ordnance accident. Victims are recorded without names (data minimisation)."""
+
+    __tablename__ = "accidents"
+    __table_args__ = (Index("ix_accidents_location", "location", postgresql_using="gist"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str | None] = mapped_column(String(32), unique=True)
+    occurred_on: Mapped[date] = mapped_column(Date)
+    location: Mapped[Any] = mapped_column(Geometry("POINT", srid=4326, spatial_index=False))
+    region: Mapped[str | None] = mapped_column(String(80))
+    item_category: Mapped[ItemCategory | None] = mapped_column(_enum(ItemCategory, "item_category"))
+    activity: Mapped[AccidentActivity] = mapped_column(_enum(AccidentActivity, "accident_activity"))
+    description: Mapped[str] = mapped_column(Text, default="")
+    hazard_id: Mapped[int | None] = mapped_column(ForeignKey("hazards.id", ondelete="SET NULL"))
+    field_report_id: Mapped[int | None] = mapped_column(
+        ForeignKey("field_reports.id", ondelete="SET NULL")
+    )
+    recorded_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    victims: Mapped[list["Victim"]] = relationship(
+        back_populates="accident", cascade="all, delete-orphan", order_by="Victim.id"
+    )
+    hazard: Mapped[Hazard | None] = relationship()
+
+
+class Victim(Base):
+    __tablename__ = "victims"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    accident_id: Mapped[int] = mapped_column(ForeignKey("accidents.id", ondelete="CASCADE"))
+    sex: Mapped[Sex] = mapped_column(_enum(Sex, "sex"))
+    age: Mapped[int | None] = mapped_column(Integer)
+    outcome: Mapped[VictimOutcome] = mapped_column(_enum(VictimOutcome, "victim_outcome"))
+    is_deminer: Mapped[bool] = mapped_column(default=False)
+
+    accident: Mapped[Accident] = relationship(back_populates="victims")
+
+
+class RiskEducationSession(Base):
+    """An explosive ordnance risk education (EORE) session, with sex and age breakdown."""
+
+    __tablename__ = "risk_education_sessions"
+    __table_args__ = (Index("ix_eore_location", "location", postgresql_using="gist"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str | None] = mapped_column(String(32), unique=True)
+    held_on: Mapped[date] = mapped_column(Date)
+    location: Mapped[Any] = mapped_column(Geometry("POINT", srid=4326, spatial_index=False))
+    region: Mapped[str | None] = mapped_column(String(80))
+    organisation: Mapped[str] = mapped_column(String(80))
+    girls: Mapped[int] = mapped_column(Integer, default=0)
+    boys: Mapped[int] = mapped_column(Integer, default=0)
+    women: Mapped[int] = mapped_column(Integer, default=0)
+    men: Mapped[int] = mapped_column(Integer, default=0)
+    notes: Mapped[str | None] = mapped_column(Text)
+    recorded_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

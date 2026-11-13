@@ -8,13 +8,20 @@ SQUARE = box_geojson(18.0, 15.0, 18.01, 15.01)
 def _clearance_task(client: TestClient, hazard_id: int, status: str = "active") -> dict:
     res = client.post(
         "/api/tasks",
-        json={"hazard_id": hazard_id, "task_type": "clearance", "organisation": "O", "status": status},
+        json={
+            "hazard_id": hazard_id,
+            "task_type": "clearance",
+            "organisation": "O",
+            "status": status,
+        },
     )
     assert res.status_code == 201
     return res.json()
 
 
-def _inspect(client: TestClient, task_id: int, outcome: str = "pass", day: str = "2026-02-01", **extra):
+def _inspect(
+    client: TestClient, task_id: int, outcome: str = "pass", day: str = "2026-02-01", **extra
+):
     return client.post(
         "/api/qa-inspections",
         json={"task_id": task_id, "inspection_date": day, "outcome": outcome, **extra},
@@ -41,10 +48,14 @@ def test_pass_with_residual_items_is_invalid(client: TestClient) -> None:
 def test_only_active_or_completed_clearance_tasks_can_be_inspected(client: TestClient) -> None:
     hid = make_hazard(client, SQUARE)["id"]
     survey = client.post(
-        "/api/tasks", json={"hazard_id": hid, "task_type": "survey", "organisation": "O", "status": "active"}
+        "/api/tasks",
+        json={"hazard_id": hid, "task_type": "survey", "organisation": "O", "status": "active"},
     ).json()
     planned = _clearance_task(client, hid, "planned")
-    assert "Only clearance tasks" in _inspect(client, survey["id"]).json()["detail"]
+    assert (
+        "Only clearance and technical survey tasks"
+        in _inspect(client, survey["id"]).json()["detail"]
+    )
     assert "only active or completed" in _inspect(client, planned["id"]).json()["detail"]
     assert _inspect(client, 9999).status_code == 404
 

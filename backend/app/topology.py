@@ -5,7 +5,8 @@ Two families of checks:
 * **Within one polygon** (shapely, in memory): slivers, tiny areas, spikes, tiny holes,
   duplicate vertices. These are digitising or conversion artefacts.
 * **Between polygons** (PostGIS, uses the spatial index): overlaps, release conflicts and
-  near-miss gaps. Cancelled hazards are ignored throughout.
+  near-miss gaps, plus hazards recorded in a different region than the administrative area
+  they lie in. Cancelled hazards are ignored throughout.
 
 The same checks power the REST API, the QA release gate (errors block release) and the
 import pipeline (surfaced there as warnings).
@@ -68,7 +69,9 @@ def compactness(area_m2: float, perimeter_m: float) -> float:
     return 4 * math.pi * area_m2 / (perimeter_m**2) if perimeter_m > 0 else 0.0
 
 
-def _ring_angles(ring_coords: list[tuple[float, float]], lat_scale: float) -> list[tuple[float, float, float]]:
+def _ring_angles(
+    ring_coords: list[tuple[float, float]], lat_scale: float
+) -> list[tuple[float, float, float]]:
     """(lon, lat, interior-angle-in-degrees) for each vertex of a closed ring."""
     pts = ring_coords[:-1] if ring_coords and ring_coords[0] == ring_coords[-1] else ring_coords
     n = len(pts)
@@ -85,7 +88,9 @@ def _ring_angles(ring_coords: list[tuple[float, float]], lat_scale: float) -> li
     return out
 
 
-def geometry_issues(geom: MultiPolygon | Polygon, area_m2: float, perimeter_m: float) -> list[GeometryFinding]:
+def geometry_issues(
+    geom: MultiPolygon | Polygon, area_m2: float, perimeter_m: float
+) -> list[GeometryFinding]:
     """Checks that look at one polygon on its own."""
     findings: list[GeometryFinding] = []
     centroid = geom.representative_point()
@@ -203,6 +208,17 @@ _GAP_SQL = text(
     """
 )
 
+_REGION_SQL = text(
+    """
+    SELECT h.id, h.code, h.region, a.name AS area, ST_X(q.p) AS lon, ST_Y(q.p) AS lat
+    FROM hazards h
+    CROSS JOIN LATERAL (SELECT ST_PointOnSurface(h.geom) AS p) q
+    JOIN admin_areas a ON ST_Contains(a.geom, q.p)
+    WHERE h.status <> 'cancelled' AND a.name <> h.region
+      AND (CAST(:hid AS integer) IS NULL OR h.id = CAST(:hid AS integer))
+    """
+)
+
 _ADJACENCY_SQL = text(
     """
     SELECT a.id AS a_id, a.code AS a_code, b.id AS b_id, b.code AS b_code,
@@ -298,6 +314,19 @@ def check(
             )
         )
 
+    for row in db.execute(_REGION_SQL, {"hid": hazard_id}):
+        issues.append(
+            Issue(
+                "region_mismatch",
+                "warning",
+                f"{row.code} is recorded in {row.region} but lies in {row.area}",
+                [row.id],
+                [row.code],
+                _point(row.lon, row.lat),
+                None,
+            )
+        )
+
     issues.sort(key=lambda i: (-SEVERITY_RANK[i.severity], i.rule, i.hazard_ids))
     return len(rows), issues
 
@@ -376,7 +405,9 @@ def clusters(db: Session, min_size: int = 2) -> tuple[list[Cluster], int]:
     info = {
         r.id: r
         for r in db.execute(
-            text("SELECT id, code, status, region, area_m2 FROM hazards WHERE status <> 'cancelled'")
+            text(
+                "SELECT id, code, status, region, area_m2 FROM hazards WHERE status <> 'cancelled'"
+            )
         )
     }
     boundary_by_root: dict[int, float] = {}
@@ -391,7 +422,9 @@ def clusters(db: Session, min_size: int = 2) -> tuple[list[Cluster], int]:
         cluster = Cluster(shared_boundary_m=boundary_by_root.get(root, 0.0))
         for hid in sorted(ids):
             h = info[hid]
-            cluster.members.append({"id": h.id, "code": h.code, "status": h.status, "region": h.region})
+            cluster.members.append(
+                {"id": h.id, "code": h.code, "status": h.status, "region": h.region}
+            )
             cluster.total_area_m2 += float(h.area_m2)
             cluster.status_counts[h.status] = cluster.status_counts.get(h.status, 0) + 1
         cluster.regions = sorted({m["region"] for m in cluster.members})

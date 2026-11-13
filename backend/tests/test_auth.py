@@ -36,7 +36,9 @@ def test_login_returns_token_and_user(anon: TestClient) -> None:
 
 
 @pytest.mark.parametrize("username,password", [("editor", "wrong"), ("nobody", PASSWORD)])
-def test_bad_credentials_are_rejected_identically(anon: TestClient, username: str, password: str) -> None:
+def test_bad_credentials_are_rejected_identically(
+    anon: TestClient, username: str, password: str
+) -> None:
     res = login(anon, username, password)
     assert res.status_code == 401
     assert res.json()["detail"] == "Incorrect username or password"
@@ -114,15 +116,21 @@ def test_editor_can_enter_data_but_not_delete_inspect_or_release(
         "/api/tasks",
         json={"hazard_id": hazard["id"], "task_type": "clearance", "organisation": "O"},
     ).json()
-    assert editor.post(
-        "/api/clearance-records",
-        json={"task_id": task["id"], "record_date": "2026-01-01", "team": "T"},
-    ).status_code == 201
+    assert (
+        editor.post(
+            "/api/clearance-records",
+            json={"task_id": task["id"], "record_date": "2026-01-01", "team": "T"},
+        ).status_code
+        == 201
+    )
     assert editor.delete(f"/api/hazards/{hazard['id']}").status_code == 403
-    assert editor.post(
-        "/api/qa-inspections",
-        json={"task_id": task["id"], "inspection_date": "2026-01-02", "outcome": "pass"},
-    ).status_code == 403
+    assert (
+        editor.post(
+            "/api/qa-inspections",
+            json={"task_id": task["id"], "inspection_date": "2026-01-02", "outcome": "pass"},
+        ).status_code
+        == 403
+    )
 
     prepare_for_release(client, make_hazard(client, box_geojson(18.5, 15.0, 18.51, 15.01))["id"])
     ready = client.get("/api/hazards", params={"status": "in_clearance"}).json()[0]
@@ -150,7 +158,12 @@ def test_only_admin_deletes_and_manages_users(as_role, client: TestClient) -> No
 
 
 def test_admin_creates_user_who_can_log_in(client: TestClient, anon: TestClient) -> None:
-    body = {"username": "new.user", "display_name": "New", "role": "editor", "password": "long-enough-pw"}
+    body = {
+        "username": "new.user",
+        "display_name": "New",
+        "role": "editor",
+        "password": "long-enough-pw",
+    }
     created = client.post("/api/users", json=body)
     assert created.status_code == 201 and "password" not in created.json()
     assert login(anon, "new.user", "long-enough-pw").status_code == 200
@@ -164,7 +177,9 @@ def test_admin_creates_user_who_can_log_in(client: TestClient, anon: TestClient)
 
 def test_audit_records_who_did_it(as_role, client: TestClient) -> None:
     hazard = as_role("editor").post("/api/hazards", json=HAZARD).json()
-    entry = client.get("/api/audit", params={"entity_type": "hazard", "entity_id": hazard["id"]}).json()[0]
+    entry = client.get(
+        "/api/audit", params={"entity_type": "hazard", "entity_id": hazard["id"]}
+    ).json()[0]
     assert entry["actor"] == "editor" and entry["source"] == "api"
 
 
@@ -173,14 +188,26 @@ def test_audit_records_who_did_it(as_role, client: TestClient) -> None:
 
 def test_meta_hides_demo_accounts_unless_demo_mode(anon: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(auth_users, "get_settings", lambda: Settings(demo_mode=False))
-    assert anon.get("/api/meta").json() == {"demo_mode": False, "demo_password": None, "demo_users": []}
+    assert anon.get("/api/meta").json() == {
+        "demo_mode": False,
+        "demo_password": None,
+        "demo_users": [],
+    }
 
 
 def test_meta_lists_demo_accounts_in_demo_mode(anon: TestClient, monkeypatch) -> None:
-    monkeypatch.setattr(auth_users, "get_settings", lambda: Settings(demo_mode=True, demo_password="pw-x"))
+    monkeypatch.setattr(
+        auth_users, "get_settings", lambda: Settings(demo_mode=True, demo_password="pw-x")
+    )
     body = anon.get("/api/meta").json()
     assert body["demo_mode"] and body["demo_password"] == "pw-x"
-    assert {u["role"] for u in body["demo_users"]} == {"viewer", "surveyor", "editor", "qa_officer", "admin"}
+    assert {u["role"] for u in body["demo_users"]} == {
+        "viewer",
+        "surveyor",
+        "editor",
+        "qa_officer",
+        "admin",
+    }
 
 
 def test_swagger_authorize_uses_form_login() -> None:

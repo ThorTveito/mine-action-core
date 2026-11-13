@@ -63,7 +63,9 @@ def prepare_for_release(
     return task
 
 
-def release_hazard(client: TestClient, hazard_id: int, cleared: float = 100, found: int = 0) -> None:
+def release_hazard(
+    client: TestClient, hazard_id: int, cleared: float = 100, found: int = 0
+) -> None:
     """Walk a hazard through the legal lifecycle to `released` (use an admin client)."""
     prepare_for_release(client, hazard_id, cleared, found)
     res = client.patch(f"/api/hazards/{hazard_id}", json={"status": "released"})

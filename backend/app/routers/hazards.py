@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import audit, geo, rules
+from app import audit, gazetteer, geo, rules
 from app.auth import CurrentUser, Permission, ensure, require
 from app.config import get_settings
 from app.db import get_db
@@ -119,8 +119,10 @@ def _authorize_update(
     )
     if releasing:
         ensure(user, Permission.RELEASE, "releasing hazards")
-    if geometry_changed or any(k != "status" for k in changes) or (
-        "status" in changes and not releasing
+    if (
+        geometry_changed
+        or any(k != "status" for k in changes)
+        or ("status" in changes and not releasing)
     ):
         ensure(user, Permission.WRITE, "editing hazards")
 
@@ -140,6 +142,7 @@ def create_hazard(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=msg)
     geom = _parse_geometry(payload.geometry)
     values = payload.model_dump(exclude={"geometry"})
+    values["region"] = gazetteer.region_for(db, geom, payload.region)
     hazard = Hazard(**values, geom=geo.to_db_geometry(geom), area_m2=geo.area_m2(db, geom))
     db.add(hazard)
     db.flush()

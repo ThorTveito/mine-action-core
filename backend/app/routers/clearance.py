@@ -1,13 +1,13 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import audit
 from app.auth import Permission, require
 from app.db import get_db
-from app.models import ClearanceRecord, Task, User
+from app.models import RELEASE_METHOD_FOR_TASK, ClearanceRecord, Hazard, Task, User
 from app.schemas import ClearanceRecordCreate, ClearanceRecordRead
 
 router = APIRouter(prefix="/clearance-records", tags=["clearance"])
@@ -48,9 +48,39 @@ def create_record(
     db: DbDep,
     user: Annotated[User, Depends(require(Permission.WRITE))],
 ) -> ClearanceRecord:
-    if db.get(Task, payload.task_id) is None:
+    task = db.get(Task, payload.task_id)
+    if task is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Task {payload.task_id} not found")
-    values = payload.model_dump()
+    expected = RELEASE_METHOD_FOR_TASK.get(task.task_type)
+    if expected is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"{task.task_type.value} tasks do not release land; record nothing here",
+        )
+    if payload.release_method is not None and payload.release_method != expected:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"A {task.task_type.value} task releases land as '{expected.value}', "
+                f"not '{payload.release_method.value}'"
+            ),
+        )
+    hazard = db.get(Hazard, task.hazard_id)
+    assert hazard is not None
+    released = db.scalar(
+        select(func.coalesce(func.sum(ClearanceRecord.area_cleared_m2), 0.0))
+        .join(Task, ClearanceRecord.task_id == Task.id)
+        .where(Task.hazard_id == hazard.id)
+    )
+    if released + payload.area_cleared_m2 > hazard.area_m2 * 1.01:  # 1% for GPS rounding
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"This would release {released + payload.area_cleared_m2:,.0f} m2 in total, "
+                f"more than {hazard.code}'s {hazard.area_m2:,.0f} m2"
+            ),
+        )
+    values = payload.model_dump() | {"release_method": expected}
     record = ClearanceRecord(**values)
     db.add(record)
     db.flush()

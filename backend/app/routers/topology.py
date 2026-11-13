@@ -67,9 +67,7 @@ def get_adjacency(db: DbDep) -> list[AdjacencyEdge]:
 
 
 @router.get("/clusters", response_model=TopologyClusters)
-def get_clusters(
-    db: DbDep, min_size: Annotated[int, Query(ge=2, le=100)] = 2
-) -> TopologyClusters:
+def get_clusters(db: DbDep, min_size: Annotated[int, Query(ge=2, le=100)] = 2) -> TopologyClusters:
     """Contiguous groups of hazards connected by shared edges, largest area first."""
     found, isolated = topology.clusters(db, min_size)
     return TopologyClusters(

@@ -24,7 +24,10 @@ def test_out_of_range_coordinates_are_rejected() -> None:
     # Looks like projected metres, a classic CRS mix-up.
     with pytest.raises(geo.GeometryError, match="out of range"):
         geo.parse_polygonal_geojson(
-            {"type": "Polygon", "coordinates": [[[500000, 0], [500100, 0], [500100, 100], [500000, 0]]]}
+            {
+                "type": "Polygon",
+                "coordinates": [[[500000, 0], [500100, 0], [500100, 100], [500000, 0]]],
+            }
         )
 
 

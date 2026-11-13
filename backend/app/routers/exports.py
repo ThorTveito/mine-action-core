@@ -2,24 +2,39 @@
 
 import csv
 import io
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from geoalchemy2.shape import to_shape
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import geo
+from app import analytics, geo
 from app.db import get_db
 from app.models import ClearanceRecord, Hazard, Task
 from app.routers.stats import get_dashboard
+from app.schemas import (
+    AnnualReport,
+    Casualties,
+    LandRelease,
+    QaSummary,
+    RegionSnapshot,
+    RiskEducationSummary,
+)
 
 router = APIRouter(tags=["exports"])
 DbDep = Annotated[Session, Depends(get_db)]
 
 HAZARD_COLUMNS = [
-    "code", "name", "hazard_type", "hazard_class", "status", "region", "description", "wkt",
+    "code",
+    "name",
+    "hazard_type",
+    "hazard_class",
+    "status",
+    "region",
+    "description",
+    "wkt",
 ]  # fmt: skip: same columns the importer reads, so an export can be re-imported
 
 
@@ -122,6 +137,48 @@ def progress_report(db: DbDep) -> Response:
     return _csv_response(f"progress-report-{date.today().isoformat()}.csv", header, rows)
 
 
+@router.get("/reports/annual", response_model=AnnualReport)
+def annual_report(
+    db: DbDep, year: Annotated[int, Query(ge=1990, le=2100)] = date.today().year
+) -> AnnualReport:
+    """An annual summary in the spirit of treaty transparency reporting (e.g. APMBC Article 7).
+
+    Land release, casualties, risk education and QA are for `year`; contamination figures
+    are the current state.
+    """
+    regions = list(db.scalars(select(Hazard.region).distinct().order_by(Hazard.region)))
+    snapshots = []
+    for region in regions:
+        release = analytics.land_release(db, region, year)
+        open_count = db.scalar(
+            select(func.count())
+            .select_from(Hazard)
+            .where(Hazard.region == region, Hazard.status.in_(analytics.OPEN))
+        )
+        snapshots.append(
+            RegionSnapshot(
+                region=region,
+                open_hazards=int(open_count or 0),
+                outstanding_m2=analytics.outstanding_area(db, region),
+                cancelled_m2=release["cancelled_m2"],
+                reduced_m2=release["reduced_m2"],
+                cleared_m2=release["cleared_m2"],
+            )
+        )
+    return AnnualReport(
+        year=year,
+        country="Karvonia (fictional; synthetic data)",
+        generated_at=datetime.now(UTC),
+        open_hazards=sum(s.open_hazards for s in snapshots),
+        outstanding_m2=analytics.outstanding_area(db),
+        regions=snapshots,
+        land_release=LandRelease(**analytics.land_release(db, None, year)),
+        casualties=Casualties(**analytics.casualties(db, None, year)),
+        risk_education=RiskEducationSummary(**analytics.risk_education(db, None, year)),
+        qa=QaSummary(**analytics.qa_summary(db, None, year)),
+    )
+
+
 @router.get("/reports/clearance.csv")
 def clearance_report(db: DbDep) -> Response:
     """One line per clearance record: who cleared how much, where, and what they found."""
@@ -133,12 +190,13 @@ def clearance_report(db: DbDep) -> Response:
     )
     header = [
         "hazard_code", "hazard_name", "region", "task_code", "organisation", "record_date",
-        "team", "area_cleared_m2", "items_found", "items_destroyed",
+        "team", "release_method", "area_released_m2", "items_found", "items_destroyed",
     ]  # fmt: skip
     rows = [
         [
             h.code, h.name, h.region, t.code, t.organisation, r.record_date.isoformat(),
-            r.team, round(r.area_cleared_m2, 1), r.items_found, r.items_destroyed,
+            r.team, r.release_method.value, round(r.area_cleared_m2, 1), r.items_found,
+            r.items_destroyed,
         ]
         for h, t, r in db.execute(stmt)
     ]  # fmt: skip

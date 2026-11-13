@@ -29,7 +29,16 @@ def test_exports_are_public_downloads(anon: TestClient, client: TestClient) -> N
 def test_hazards_csv_has_import_columns_and_wkt(client: TestClient) -> None:
     make_hazard(client, box_geojson(18.0, 15.0, 18.004, 15.004), name="Mill Road")
     table = rows(client.get("/api/exports/hazards.csv"))
-    assert table[0] == ["code", "name", "hazard_type", "hazard_class", "status", "region", "description", "wkt"]
+    assert table[0] == [
+        "code",
+        "name",
+        "hazard_type",
+        "hazard_class",
+        "status",
+        "region",
+        "description",
+        "wkt",
+    ]
     assert table[1][:2] == ["KRV-HAZ-00001", "Mill Road"]
     assert table[1][7].startswith("MULTIPOLYGON")
 
@@ -54,7 +63,7 @@ def test_hazards_geojson_export(client: TestClient) -> None:
 
 
 def test_formula_injection_is_neutralised(client: TestClient) -> None:
-    for risky in ["=HYPERLINK(\"http://x\")", "+1+1", "-2+3", "@SUM(A1)"]:
+    for risky in ['=HYPERLINK("http://x")', "+1+1", "-2+3", "@SUM(A1)"]:
         assert safe_cell(risky) == "'" + risky
     assert safe_cell("Normal name") == "Normal name" and safe_cell(42) == 42
     make_hazard(client, box_geojson(18.0, 15.0, 18.004, 15.004), name="=cmd|' /C calc'!A0")
@@ -71,7 +80,9 @@ def test_progress_report_has_regions_and_total(client: TestClient) -> None:
     assert by_region["Central Basin"][6] == "100.0"  # release_percent
     assert by_region["River Delta"][3] == "0"
     assert by_region["Central Basin"][5] == "1234"  # cleared_area_m2
-    assert table[-1][1] == "2" and table[-1][6] == str(round(100 * float(table[-1][3]) / float(table[-1][2]), 1))
+    assert table[-1][1] == "2" and table[-1][6] == str(
+        round(100 * float(table[-1][3]) / float(table[-1][2]), 1)
+    )
 
 
 def test_clearance_report_lists_each_record(client: TestClient) -> None:
@@ -80,5 +91,9 @@ def test_clearance_report_lists_each_record(client: TestClient) -> None:
     table = rows(client.get("/api/reports/clearance.csv"))
     assert len(table) == 2
     record = dict(zip(table[0], table[1], strict=True))
-    assert record["hazard_code"] == "KRV-HAZ-00001" and record["area_cleared_m2"] == "500.0"
+    assert (
+        record["hazard_code"] == "KRV-HAZ-00001"
+        and record["area_released_m2"] == "500.0"
+        and record["release_method"] == "cleared"
+    )
     assert (record["items_found"], record["items_destroyed"]) == ("2", "2")

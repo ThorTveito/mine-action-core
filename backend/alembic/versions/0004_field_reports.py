@@ -4,6 +4,7 @@ Revision ID: 0004
 Revises: 0003
 Create Date: 2026-11-12
 """
+
 import geoalchemy2
 import sqlalchemy as sa
 from alembic import op
@@ -64,13 +65,9 @@ def upgrade() -> None:
             "source IN ('direct_observation','local_informant','authority')",
             name="ck_fr_source",
         ),
-        sa.CheckConstraint(
-            "status IN ('submitted','accepted','rejected')", name="ck_fr_status"
-        ),
+        sa.CheckConstraint("status IN ('submitted','accepted','rejected')", name="ck_fr_status"),
         sa.CheckConstraint("quantity IS NULL OR quantity >= 0", name="ck_fr_quantity"),
-        sa.CheckConstraint(
-            "gps_accuracy_m IS NULL OR gps_accuracy_m >= 0", name="ck_fr_accuracy"
-        ),
+        sa.CheckConstraint("gps_accuracy_m IS NULL OR gps_accuracy_m >= 0", name="ck_fr_accuracy"),
     )
     op.create_index(
         "ix_field_reports_location", "field_reports", ["location"], postgresql_using="gist"

@@ -76,7 +76,9 @@ def test_seed_creates_demo_users_that_can_log_in(seeded: TestClient) -> None:
 
 
 def test_bootstrap_seeds_only_an_empty_database(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(bootstrap, "get_settings", lambda: Settings(demo_mode=True, seed_on_empty=True))
+    monkeypatch.setattr(
+        bootstrap, "get_settings", lambda: Settings(demo_mode=True, seed_on_empty=True)
+    )
     admin = client_as("admin")
     try:
         bootstrap.main()

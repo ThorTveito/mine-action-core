@@ -14,7 +14,10 @@ def test_dashboard_empty(client: TestClient) -> None:
 def test_dashboard_progress_by_region_and_month(
     client: TestClient, hazard: dict, hazard_payload: dict
 ) -> None:
-    far = {"type": "Polygon", "coordinates": [[[18.5, 15.0], [18.51, 15.0], [18.51, 15.01], [18.5, 15.01], [18.5, 15.0]]]}
+    far = {
+        "type": "Polygon",
+        "coordinates": [[[18.5, 15.0], [18.51, 15.0], [18.51, 15.01], [18.5, 15.01], [18.5, 15.0]]],
+    }
     other = client.post(
         "/api/hazards", json={**hazard_payload, "region": "River Delta", "geometry": far}
     ).json()
@@ -61,8 +64,13 @@ def _field_reports_and_qa(client: TestClient, as_role) -> None:
     client.post(f"/api/field-reports/{first['id']}/reject", json={"reason": "duplicate"})
 
 
-def test_dashboard_sections(client: TestClient, hazard: dict, hazard_payload: dict, as_role) -> None:
-    far = {"type": "Polygon", "coordinates": [[[18.5, 15.0], [18.51, 15.0], [18.51, 15.01], [18.5, 15.01], [18.5, 15.0]]]}
+def test_dashboard_sections(
+    client: TestClient, hazard: dict, hazard_payload: dict, as_role
+) -> None:
+    far = {
+        "type": "Polygon",
+        "coordinates": [[[18.5, 15.0], [18.51, 15.0], [18.51, 15.01], [18.5, 15.01], [18.5, 15.0]]],
+    }
     other = client.post(
         "/api/hazards",
         json={**hazard_payload, "region": "River Delta", "geometry": far, "hazard_class": "uxo"},
@@ -80,9 +88,19 @@ def test_dashboard_sections(client: TestClient, hazard: dict, hazard_payload: di
     assert body["monthly_clearance"][0]["items_found"] == 2
     org = body["organisations"][0]
     assert (org["organisation"], org["completed_tasks"], org["cleared_area_m2"]) == ("Org", 1, 800)
-    assert body["qa"] == {"inspections": 1, "passed": 1, "failed": 0, "pass_rate": 100.0, "residual_items": 0}
+    assert body["qa"] == {
+        "inspections": 1,
+        "passed": 1,
+        "failed": 0,
+        "pass_rate": 100.0,
+        "residual_items": 0,
+    }
     fr = body["field_reports"]
-    assert fr["total"] == 2 and fr["by_status"]["rejected"] == 1 and fr["by_finding_type"]["suspected_area"] == 2
+    assert (
+        fr["total"] == 2
+        and fr["by_status"]["rejected"] == 1
+        and fr["by_finding_type"]["suspected_area"] == 2
+    )
     assert fr["median_review_hours"] is not None
     assert body["data_quality"] == {"errors": 0, "warnings": 0, "by_rule": {}}
     summaries = [a["summary"] for a in body["recent_activity"]]
@@ -92,13 +110,20 @@ def test_dashboard_sections(client: TestClient, hazard: dict, hazard_payload: di
 
 
 def test_dashboard_region_filter(client: TestClient, hazard: dict, hazard_payload: dict) -> None:
-    far = {"type": "Polygon", "coordinates": [[[18.5, 15.0], [18.51, 15.0], [18.51, 15.01], [18.5, 15.01], [18.5, 15.0]]]}
-    other = client.post("/api/hazards", json={**hazard_payload, "region": "River Delta", "geometry": far}).json()
+    far = {
+        "type": "Polygon",
+        "coordinates": [[[18.5, 15.0], [18.51, 15.0], [18.51, 15.01], [18.5, 15.01], [18.5, 15.0]]],
+    }
+    other = client.post(
+        "/api/hazards", json={**hazard_payload, "region": "River Delta", "geometry": far}
+    ).json()
     release_hazard(client, hazard["id"], cleared=800)
 
     delta = client.get("/api/dashboard", params={"region": "River Delta"}).json()
     assert delta["region"] == "River Delta" and delta["regions"] == ["Central Basin", "River Delta"]
-    assert delta["hazard_count"] == 1 and delta["contaminated_area_m2"] == pytest.approx(other["area_m2"])
+    assert delta["hazard_count"] == 1 and delta["contaminated_area_m2"] == pytest.approx(
+        other["area_m2"]
+    )
     assert delta["release_percent"] == 0 and delta["monthly_clearance"] == []
     assert delta["qa"]["inspections"] == 0 and delta["qa"]["pass_rate"] is None
     assert [r["region"] for r in delta["by_region"]] == ["River Delta"]
@@ -108,7 +133,9 @@ def test_dashboard_region_filter(client: TestClient, hazard: dict, hazard_payloa
     assert client.get("/api/dashboard", params={"region": "Atlantis"}).status_code == 404
 
 
-def test_dashboard_is_public_and_leaks_nothing_private(anon: TestClient, client: TestClient, as_role) -> None:
+def test_dashboard_is_public_and_leaks_nothing_private(
+    anon: TestClient, client: TestClient, as_role
+) -> None:
     _field_reports_and_qa(client, as_role)
     text = anon.get("/api/dashboard").text
     assert "Jane Doe" not in text and "surveyor" not in text and "admin" not in text

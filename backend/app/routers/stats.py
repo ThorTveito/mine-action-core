@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import topology
+from app import analytics, priority, topology
 from app.db import get_db
 from app.models import (
     AuditLog,
@@ -13,8 +13,6 @@ from app.models import (
     FindingType,
     Hazard,
     HazardStatus,
-    InspectionOutcome,
-    QaInspection,
     ReportStatus,
     Task,
     TaskStatus,
@@ -22,14 +20,18 @@ from app.models import (
 )
 from app.schemas import (
     ActivityItem,
+    Casualties,
     ClassBreakdown,
     Dashboard,
     DataQuality,
     FieldReportSummary,
+    LandRelease,
     MonthlyClearance,
     OrganisationStats,
+    PriorityOut,
     QaSummary,
     RegionProgress,
+    RiskEducationSummary,
     Stats,
 )
 
@@ -206,8 +208,9 @@ def get_dashboard(db: DbDep, region: str | None = None) -> Dashboard:
     # --- organisations
     orgs: dict[str, OrganisationStats] = {}
     for org, st, n in db.execute(
-        _in_region(select(Task.organisation, Task.status, func.count()).join(Hazard), region)
-        .group_by(Task.organisation, Task.status)
+        _in_region(
+            select(Task.organisation, Task.status, func.count()).join(Hazard), region
+        ).group_by(Task.organisation, Task.status)
     ):
         o = orgs.setdefault(
             org,
@@ -237,33 +240,9 @@ def get_dashboard(db: DbDep, region: str | None = None) -> Dashboard:
             orgs[org].cleared_area_m2 = float(area)
             orgs[org].items_destroyed = int(destroyed)
 
-    # --- QA
-    passed = failed = residual = 0
-    for outcome, n, res in db.execute(
-        _in_region(
-            select(
-                QaInspection.outcome,
-                func.count(),
-                func.coalesce(func.sum(QaInspection.residual_items_found), 0),
-            )
-            .join(Task, QaInspection.task_id == Task.id)
-            .join(Hazard, Task.hazard_id == Hazard.id),
-            region,
-        ).group_by(QaInspection.outcome)
-    ):
-        if outcome == InspectionOutcome.PASS:
-            passed = n
-        else:
-            failed = n
-        residual += int(res)
-    inspections = passed + failed
-    qa = QaSummary(
-        inspections=inspections,
-        passed=passed,
-        failed=failed,
-        pass_rate=round(100 * passed / inspections, 1) if inspections else None,
-        residual_items=residual,
-    )
+    qa = QaSummary(**analytics.qa_summary(db, region))
+    release = analytics.land_release(db, region)
+    top = [PriorityOut(**vars(p)) for p in priority.rank(db, region)[:8]]
 
     return Dashboard(
         region=region,
@@ -286,6 +265,11 @@ def get_dashboard(db: DbDep, region: str | None = None) -> Dashboard:
         monthly_clearance=monthly,
         organisations=sorted(orgs.values(), key=lambda o: -o.cleared_area_m2),
         qa=qa,
+        outstanding_area_m2=analytics.outstanding_area(db, region),
+        land_release=LandRelease(**release),
+        casualties=Casualties(**analytics.casualties(db, region)),
+        risk_education=RiskEducationSummary(**analytics.risk_education(db, region)),
+        top_priorities=top,
         field_reports=_field_report_summary(db),
         data_quality=_data_quality(db),
         recent_activity=_recent_activity(db),
@@ -294,9 +278,7 @@ def get_dashboard(db: DbDep, region: str | None = None) -> Dashboard:
 
 def _field_report_summary(db: Session) -> FieldReportSummary:
     by_status = {s.value: 0 for s in ReportStatus}
-    for st, n in db.execute(
-        select(FieldReport.status, func.count()).group_by(FieldReport.status)
-    ):
+    for st, n in db.execute(select(FieldReport.status, func.count()).group_by(FieldReport.status)):
         by_status[st.value] = n
     by_type = {t.value: 0 for t in FindingType}
     for ft, n in db.execute(
@@ -347,7 +329,9 @@ def _recent_activity(db: Session, limit: int = 12) -> list[ActivityItem]:
     ).all()
     hazard_ids = {r.entity_id for r in rows if r.entity_type == "hazard"}
     task_ids = {r.entity_id for r in rows if r.entity_type == "task"}
-    hazard_code = dict(db.execute(select(Hazard.id, Hazard.code).where(Hazard.id.in_(hazard_ids))).all())
+    hazard_code = dict(
+        db.execute(select(Hazard.id, Hazard.code).where(Hazard.id.in_(hazard_ids))).all()
+    )
     task_code = dict(db.execute(select(Task.id, Task.code).where(Task.id.in_(task_ids))).all())
 
     def words(v: object) -> object:

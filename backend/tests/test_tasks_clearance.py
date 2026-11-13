@@ -78,7 +78,10 @@ def test_clearance_record_happy_path_and_filter(client: TestClient, hazard: dict
 def test_clearance_record_validation(client: TestClient, hazard: dict) -> None:
     task = _task(client, hazard["id"])
     base = {"task_id": task["id"], "record_date": "2026-02-01", "team": "Team Bravo"}
-    assert client.post("/api/clearance-records", json={**base, "area_cleared_m2": -1}).status_code == 422
+    assert (
+        client.post("/api/clearance-records", json={**base, "area_cleared_m2": -1}).status_code
+        == 422
+    )
     over = {**base, "items_found": 1, "items_destroyed": 2}
     assert client.post("/api/clearance-records", json=over).status_code == 422
     missing = {**base, "task_id": 999}

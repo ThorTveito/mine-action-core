@@ -15,7 +15,7 @@ from shapely.geometry import Point, mapping
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app import audit, geo, topology
+from app import audit, gazetteer, geo, topology
 from app.auth import CurrentUser, Permission, ensure, has_permission
 from app.config import get_settings
 from app.db import get_db
@@ -247,7 +247,7 @@ def _require_submitted(report: FieldReport) -> None:
 def accept_report(
     report_id: int, payload: AcceptReport, db: DbDep, user: CurrentUser
 ) -> ReportDecision:
-    """Turn the report into a new suspected hazard, or link it to an existing hazard."""
+    """Turn the report into a new suspected hazard, link it to a hazard, or record an accident."""
     ensure(user, Permission.WRITE, "reviewing field reports")
     report = _get_visible(db, report_id, user)
     _require_submitted(report)
@@ -255,7 +255,26 @@ def accept_report(
     warnings = _released_warnings(db, point.x, point.y)
     source = f"field_report:{report.code}"
 
-    if payload.mode == "link":
+    accident_id: int | None = None
+    if payload.mode == "accident":
+        from app.routers.casualties import create_accident
+
+        accident = create_accident(
+            db,
+            occurred_on=report.observed_at.date(),
+            lon=point.x,
+            lat=point.y,
+            item_category=report.item_category,
+            activity=payload.activity,
+            description=payload.note or "",  # the report's own text stays in the report
+            victims=payload.victims,
+            actor=user.username,
+            source=source,
+            field_report_id=report.id,
+        )
+        accident_id = accident.id
+        hazard = db.get(Hazard, accident.hazard_id) if accident.hazard_id else None
+    elif payload.mode == "link":
         hazard = db.get(Hazard, payload.hazard_id)
         if hazard is None:
             raise HTTPException(
@@ -268,19 +287,22 @@ def accept_report(
         _, issues = topology.check(db, hazard.id)
         warnings += [i.message for i in issues if i.severity == "error"]
 
+    hazard_id = hazard.id if hazard else None
     trail = audit.diff(
         report,
-        {"status": ReportStatus.ACCEPTED, "hazard_id": hazard.id, "reviewed_by": user.username},
+        {"status": ReportStatus.ACCEPTED, "hazard_id": hazard_id, "reviewed_by": user.username},
     )
     report.status = ReportStatus.ACCEPTED
-    report.hazard_id = hazard.id
+    report.hazard_id = hazard_id
     report.reviewed_by = user.username
     report.reviewed_at = datetime.now(UTC)
     report.review_note = payload.note
     audit.record(db, "field_report", report.id, "update", trail, source="api", actor=user.username)
     db.commit()
     db.refresh(report)
-    return ReportDecision(report=to_read(report), hazard_id=hazard.id, warnings=warnings)
+    return ReportDecision(
+        report=to_read(report), hazard_id=hazard_id, warnings=warnings, accident_id=accident_id
+    )
 
 
 def _new_hazard_from_report(
@@ -325,7 +347,9 @@ def _new_hazard_from_report(
 
 
 def _nearest_region(db: Session, lon: float, lat: float) -> str:
-    """Region of the nearest existing hazard (KNN on the spatial index), else 'Unassigned'."""
+    """The admin area containing the point; else the nearest hazard's region (KNN)."""
+    if (area := gazetteer.area_for(db, Point(lon, lat))) is not None:
+        return area
     region = db.execute(
         text(
             "SELECT region FROM hazards "

@@ -51,9 +51,7 @@ def has_permission(user: User, permission: Permission) -> bool:
     return permission in ROLE_PERMISSIONS[user.role]
 
 
-def get_current_user(
-    db: DbDep, token: Annotated[str | None, Depends(oauth2_scheme)]
-) -> User:
+def get_current_user(db: DbDep, token: Annotated[str | None, Depends(oauth2_scheme)]) -> User:
     unauthorized = HTTPException(
         status.HTTP_401_UNAUTHORIZED,
         detail="Login required",

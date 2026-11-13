@@ -15,6 +15,7 @@ DbDep = Annotated[Session, Depends(get_db)]
 # Entity types whose history is as private as the entities themselves.
 _RESTRICTED: dict[str, Permission] = {
     "field_report": Permission.VIEW_REPORTS,  # locations and informant details
+    "accident": Permission.VIEW_REPORTS,  # victim data
     "user": Permission.MANAGE_USERS,
 }
 

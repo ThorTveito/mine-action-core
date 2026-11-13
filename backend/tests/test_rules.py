@@ -30,7 +30,7 @@ def test_cannot_release_without_completed_clearance(client: TestClient, hazard: 
     _patch(client, hazard["id"], "in_clearance")
     res = _patch(client, hazard["id"], "released")
     assert res.status_code == 409
-    assert "no completed clearance task" in res.json()["detail"]
+    assert "no completed clearance or technical survey task" in res.json()["detail"]
 
 
 def test_cannot_release_with_open_task(client: TestClient, hazard: dict) -> None:

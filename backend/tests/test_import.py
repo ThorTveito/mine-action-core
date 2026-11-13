@@ -9,8 +9,15 @@ HEADER = "code,name,hazard_type,hazard_class,status,region,description,wkt\n"
 URL = "/api/imports/hazards"
 
 
-def row(name: str, wkt: str, code: str = "", status: str = "", region: str = "Central Basin",
-        htype: str = "SHA", hclass: str = "anti_personnel") -> str:
+def row(
+    name: str,
+    wkt: str,
+    code: str = "",
+    status: str = "",
+    region: str = "Central Basin",
+    htype: str = "SHA",
+    hclass: str = "anti_personnel",
+) -> str:
     return f'{code},{name},{htype},{hclass},{status},{region},,"{wkt}"\n'
 
 
@@ -33,7 +40,11 @@ def test_dry_run_validates_but_changes_nothing(client: TestClient) -> None:
 
 
 def test_commit_creates_hazards_with_codes_and_import_audit(client: TestClient) -> None:
-    csv_text = HEADER + row("A", square_wkt(18.0, 15.0)) + row("B", square_wkt(18.1, 15.1), status="confirmed")
+    csv_text = (
+        HEADER
+        + row("A", square_wkt(18.0, 15.0))
+        + row("B", square_wkt(18.1, 15.1), status="confirmed")
+    )
     report = upload(client, csv_text, dry_run=False).json()
     assert report["committed"] is True and report["created"] == 2
     hazards = client.get("/api/hazards").json()
@@ -45,7 +56,9 @@ def test_commit_creates_hazards_with_codes_and_import_audit(client: TestClient) 
 
 def test_invalid_geometry_is_rejected_with_reason(client: TestClient) -> None:
     bowtie = "POLYGON((18 15, 18.01 15.01, 18.01 15, 18 15.01, 18 15))"
-    report = upload(client, HEADER + row("Bad", bowtie) + row("Good", square_wkt(18.1, 15.1))).json()
+    report = upload(
+        client, HEADER + row("Bad", bowtie) + row("Good", square_wkt(18.1, 15.1))
+    ).json()
     assert (report["accepted"], report["rejected"]) == (1, 1)
     assert codes(report, 1) == ["invalid_geometry"]
     assert "Self-intersection" in report["rows"][0]["errors"][0]["message"]
@@ -64,7 +77,10 @@ def test_malformed_wkt_is_rejected(client: TestClient) -> None:
 
 def _utm_square() -> str:
     t = Transformer.from_crs("EPSG:4326", "EPSG:32634", always_xy=True)
-    pts = [t.transform(lon, lat) for lon, lat in [(18.0, 15.0), (18.01, 15.0), (18.01, 15.01), (18.0, 15.01), (18.0, 15.0)]]
+    pts = [
+        t.transform(lon, lat)
+        for lon, lat in [(18.0, 15.0), (18.01, 15.0), (18.01, 15.01), (18.0, 15.01), (18.0, 15.0)]
+    ]
     return "POLYGON((" + ", ".join(f"{x:.2f} {y:.2f}" for x, y in pts) + "))"
 
 
@@ -75,7 +91,9 @@ def test_projected_coordinates_without_crs_are_flagged(client: TestClient) -> No
 
 
 def test_source_crs_reprojects_to_wgs84(client: TestClient) -> None:
-    report = upload(client, HEADER + row("Utm", _utm_square()), source_crs="EPSG:32634", dry_run=False).json()
+    report = upload(
+        client, HEADER + row("Utm", _utm_square()), source_crs="EPSG:32634", dry_run=False
+    ).json()
     assert report["accepted"] == 1
     hazard = client.get("/api/hazards/1").json()
     lon, lat = hazard["geometry"]["coordinates"][0][0][0]
@@ -92,7 +110,9 @@ def test_missing_fields_and_bad_enums_are_listed_together(client: TestClient) ->
     csv_text = HEADER + f',,XYZ,laser,,,,"{square_wkt(18, 15)}"\n'
     report = upload(client, csv_text).json()
     messages = " | ".join(i["message"] for i in report["rows"][0]["errors"])
-    assert "name is required" in messages and "region is required" in messages
+    assert (
+        "name is required" in messages and "region is required" not in messages
+    )  # region is derived
     assert "hazard_type 'XYZ'" in messages and "hazard_class 'laser'" in messages
 
 
@@ -116,7 +136,9 @@ def test_partial_overlap_warns_but_accepts(client: TestClient, hazard: dict) -> 
 
 
 def test_reject_overlaps_turns_warning_into_error(client: TestClient, hazard: dict) -> None:
-    report = upload(client, HEADER + row("Shifted", square_wkt(18.005, 15.005)), reject_overlaps=True).json()
+    report = upload(
+        client, HEADER + row("Shifted", square_wkt(18.005, 15.005)), reject_overlaps=True
+    ).json()
     assert codes(report, 1) == ["overlap"]
 
 
@@ -127,17 +149,19 @@ def test_cancelled_hazards_do_not_count_for_overlap(client: TestClient, hazard: 
 
 
 def test_update_by_code_changes_status_and_is_audited(client: TestClient, hazard: dict) -> None:
-    csv_text = HEADER + f'{hazard["code"]},,,,confirmed,,,\n'
+    csv_text = HEADER + f"{hazard['code']},,,,confirmed,,,\n"
     report = upload(client, csv_text, dry_run=False).json()
     assert report["updated"] == 1 and report["created"] == 0
     assert client.get(f"/api/hazards/{hazard['id']}").json()["status"] == "confirmed"
-    latest = client.get("/api/audit", params={"entity_type": "hazard", "entity_id": hazard["id"]}).json()[0]
+    latest = client.get(
+        "/api/audit", params={"entity_type": "hazard", "entity_id": hazard["id"]}
+    ).json()[0]
     assert latest["changes"] == {"status": ["suspected", "confirmed"]}
     assert latest["source"].startswith("import:")
 
 
 def test_update_enforces_transition_rules(client: TestClient, hazard: dict) -> None:
-    report = upload(client, HEADER + f'{hazard["code"]},,,,released,,,\n').json()
+    report = upload(client, HEADER + f"{hazard['code']},,,,released,,,\n").json()
     assert codes(report, 1) == ["invalid_transition"]
     assert "from 'suspected' to 'released'" in report["rows"][0]["errors"][0]["message"]
 
@@ -145,12 +169,20 @@ def test_update_enforces_transition_rules(client: TestClient, hazard: dict) -> N
 def test_update_to_released_checks_preconditions(client: TestClient, hazard: dict) -> None:
     client.patch(f"/api/hazards/{hazard['id']}", json={"status": "confirmed"})
     client.patch(f"/api/hazards/{hazard['id']}", json={"status": "in_clearance"})
-    report = upload(client, HEADER + f'{hazard["code"]},,,,released,,,\n').json()
-    assert "no completed clearance task" in report["rows"][0]["errors"][0]["message"]
+    report = upload(client, HEADER + f"{hazard['code']},,,,released,,,\n").json()
+    assert (
+        "no completed clearance or technical survey task"
+        in report["rows"][0]["errors"][0]["message"]
+    )
 
 
 def test_unknown_code_and_repeated_code_are_rejected(client: TestClient, hazard: dict) -> None:
-    csv_text = HEADER + "KRV-HAZ-99999,,,,confirmed,,,\n" + f'{hazard["code"]},,,,confirmed,,,\n' + f'{hazard["code"]},,,,cancelled,,,\n'
+    csv_text = (
+        HEADER
+        + "KRV-HAZ-99999,,,,confirmed,,,\n"
+        + f"{hazard['code']},,,,confirmed,,,\n"
+        + f"{hazard['code']},,,,cancelled,,,\n"
+    )
     report = upload(client, csv_text).json()
     assert codes(report, 1) == ["unknown_code"]
     assert report["rows"][1]["outcome"] == "accepted"
@@ -182,19 +214,34 @@ def test_geojson_upload(client: TestClient) -> None:
         "features": [
             {
                 "type": "Feature",
-                "properties": {"name": "G1", "hazard_type": "cha", "hazard_class": "Anti Vehicle",
-                               "region": "River Delta", "status": "Confirmed"},
-                "geometry": {"type": "Polygon", "coordinates": [[[18, 15], [18.01, 15], [18.01, 15.01], [18, 15.01], [18, 15]]]},
+                "properties": {
+                    "name": "G1",
+                    "hazard_type": "cha",
+                    "hazard_class": "Anti Vehicle",
+                    "region": "River Delta",
+                    "status": "Confirmed",
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[18, 15], [18.01, 15], [18.01, 15.01], [18, 15.01], [18, 15]]],
+                },
             },
             {"type": "Feature", "properties": {"name": "NoGeom"}, "geometry": None},
         ],
     }
-    res = client.post(URL, files={"file": ("h.geojson", json.dumps(doc), "application/json")},
-                      data={"dry_run": "false"})
+    res = client.post(
+        URL,
+        files={"file": ("h.geojson", json.dumps(doc), "application/json")},
+        data={"dry_run": "false"},
+    )
     report = res.json()
     assert (report["created"], report["rejected"]) == (1, 1)
     h = client.get("/api/hazards/1").json()
-    assert (h["hazard_type"], h["hazard_class"], h["status"]) == ("CHA", "anti_vehicle", "confirmed")
+    assert (h["hazard_type"], h["hazard_class"], h["status"]) == (
+        "CHA",
+        "anti_vehicle",
+        "confirmed",
+    )
     assert "geometry is required" in " ".join(i["message"] for i in report["rows"][1]["errors"])
 
 
@@ -219,10 +266,10 @@ def test_editor_cannot_release_through_import(as_role, client: TestClient, hazar
     from tests.helpers import prepare_for_release
 
     prepare_for_release(client, hazard["id"])
-    csv_text = HEADER + f'{hazard["code"]},,,,released,,,\n'
-    editor_report = as_role("editor").post(
-        URL, files={"file": ("h.csv", csv_text, "text/csv")}
-    ).json()
+    csv_text = HEADER + f"{hazard['code']},,,,released,,,\n"
+    editor_report = (
+        as_role("editor").post(URL, files={"file": ("h.csv", csv_text, "text/csv")}).json()
+    )
     assert "forbidden" in codes(editor_report, 1)
     admin_report = upload(client, csv_text, dry_run=False).json()
     assert admin_report["accepted"] == 1

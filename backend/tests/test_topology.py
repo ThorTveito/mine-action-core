@@ -151,7 +151,9 @@ def test_topology_errors_block_release(client: TestClient) -> None:
 def test_topology_warnings_do_not_block_release(client: TestClient) -> None:
     sliver = make_hazard(client, box_geojson(18.0, 15.0, 18.00004, 15.01))
     prepare_for_release(client, sliver["id"])
-    assert client.patch(f"/api/hazards/{sliver['id']}", json={"status": "released"}).status_code == 200
+    assert (
+        client.patch(f"/api/hazards/{sliver['id']}", json={"status": "released"}).status_code == 200
+    )
 
 
 def test_adjacency_and_clusters(client: TestClient) -> None:
@@ -192,7 +194,10 @@ def _upload(client: TestClient, wkt: str):
 
 def test_import_warns_about_sliver_and_near_miss(client: TestClient) -> None:
     make_hazard(client, A)
-    report = _upload(client, "POLYGON((18.00401 15.0, 18.00403 15.0, 18.00403 15.004, 18.00401 15.004, 18.00401 15.0))")
+    report = _upload(
+        client,
+        "POLYGON((18.00401 15.0, 18.00403 15.0, 18.00403 15.004, 18.00401 15.004, 18.00401 15.0))",
+    )
     row = report["rows"][0]
     assert row["outcome"] == "accepted"
     assert {w["code"] for w in row["warnings"]} == {"topology_sliver", "topology_gap"}

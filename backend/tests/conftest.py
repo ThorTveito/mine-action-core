@@ -56,7 +56,11 @@ def _clean() -> Iterator[None]:
     security.login_throttle.clear()
     yield
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE audit_log, field_reports, qa_inspections, clearance_records, tasks, hazards RESTART IDENTITY CASCADE"))
+        conn.execute(
+            text(
+                "TRUNCATE audit_log, victims, accidents, risk_education_sessions, field_reports, qa_inspections, clearance_records, tasks, hazards, admin_areas RESTART IDENTITY CASCADE"
+            )
+        )
 
 
 def client_as(role: str) -> TestClient:

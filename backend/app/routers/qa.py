@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 from app import audit
 from app.auth import Permission, require
 from app.db import get_db
-from app.models import QaInspection, Task, TaskStatus, TaskType, User
+from app.models import QaInspection, Task, TaskStatus, User
+from app.rules import QA_TASK_TYPES
 from app.schemas import QaInspectionCreate, QaInspectionRead
 
 router = APIRouter(prefix="/qa-inspections", tags=["qa"])
@@ -49,14 +50,14 @@ def create_inspection(
     db: DbDep,
     user: Annotated[User, Depends(require(Permission.QA))],
 ) -> QaInspection:
-    """Record a QA/QC inspection. Only clearance tasks that are active or completed qualify."""
+    """Record a QA/QC inspection of an active or completed clearance or technical survey task."""
     task = db.get(Task, payload.task_id)
     if task is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Task {payload.task_id} not found")
-    if task.task_type != TaskType.CLEARANCE:
+    if task.task_type not in QA_TASK_TYPES:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Only clearance tasks can be inspected",
+            detail="Only clearance and technical survey tasks can be inspected",
         )
     if task.status not in (TaskStatus.ACTIVE, TaskStatus.COMPLETED):
         raise HTTPException(

@@ -4,6 +4,7 @@ Revision ID: 0001
 Revises:
 Create Date: 2026-11-12
 """
+
 import geoalchemy2
 import sqlalchemy as sa
 from alembic import op
@@ -102,7 +103,9 @@ def upgrade() -> None:
         sa.CheckConstraint("area_cleared_m2 >= 0", name="ck_clearance_area_nonneg"),
         sa.CheckConstraint("items_found >= 0", name="ck_clearance_found_nonneg"),
         sa.CheckConstraint("items_destroyed >= 0", name="ck_clearance_destroyed_nonneg"),
-        sa.CheckConstraint("items_destroyed <= items_found", name="ck_clearance_destroyed_le_found"),
+        sa.CheckConstraint(
+            "items_destroyed <= items_found", name="ck_clearance_destroyed_le_found"
+        ),
     )
     op.create_index("ix_clearance_task_id", "clearance_records", ["task_id"])
 
