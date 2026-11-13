@@ -22,6 +22,7 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh; /* phones: exclude the browser's address bar */
 }
 .main {
   flex: 1;
@@ -178,14 +179,14 @@ body {
 }
 .hbar {
   display: grid;
-  grid-template-columns: minmax(90px, auto) 1fr auto;
+  grid-template-columns: var(--hbar-label, 150px) minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   font-size: 0.85rem;
   padding: 3px 0;
 }
 td .hbar {
-  grid-template-columns: 0 1fr auto;
+  --hbar-label: 0px;
   min-width: 160px;
 }
 .hbar-track {
@@ -339,7 +340,7 @@ td .hbar {
   border-radius: 1px;
 }
 .two-col.even {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 .choropleth svg {
   max-height: 380px;
@@ -759,7 +760,7 @@ dd {
 }
 .two-col {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 14px;
 }
 .chart {
@@ -1033,7 +1034,7 @@ button.link {
 }
 .field-grid {
   display: grid;
-  grid-template-columns: minmax(300px, 1fr) minmax(320px, 1.2fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
   gap: 16px;
   align-items: start;
 }
@@ -1249,4 +1250,213 @@ button.big {
     border-right: 0;
     border-top: 1px solid var(--border);
   }
+}
+
+
+/* ======================================================================
+   Layout fixes and the phone layout. Kept last so it wins on equal specificity.
+   ====================================================================== */
+.card {
+  min-width: 0;
+}
+.group-head {
+  margin-top: 18px;
+  padding-bottom: 2px;
+  border-bottom: 2px solid var(--border);
+}
+.group-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.group-head p {
+  margin: 2px 0 0;
+}
+.show-sm {
+  display: none;
+}
+.hbar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hbar-value {
+  min-width: 2.5em;
+  text-align: right;
+}
+.chart-head {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.sadd th:first-child {
+  width: 30%;
+}
+@media (max-width: 1500px) {
+  .topbar-note {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  /* Top bar: brand and account on the first row, scrollable tabs on the second. */
+  .topbar {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 8px 12px 0;
+    row-gap: 6px;
+  }
+  .topbar .brand {
+    display: block;
+    font-size: 0.95rem;
+  }
+  .login,
+  .user-chip {
+    margin-left: auto !important;
+  }
+  .user-chip .badge {
+    display: none;
+  }
+  .tabs {
+    order: 3;
+    flex-basis: 100%;
+    margin: 0 -12px;
+    padding: 0 12px 8px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tab {
+    padding: 8px 12px;
+    font-size: 0.95rem;
+  }
+
+  /* Comfortable touch targets. */
+  button,
+  select,
+  a.button,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) {
+    min-height: 42px;
+  }
+  button.small {
+    min-height: 38px;
+    padding: 6px 12px;
+  }
+  button.link {
+    min-height: 0;
+    padding: 8px 0;
+  }
+  .mini-select {
+    min-height: 34px;
+  }
+  .maplibregl-ctrl-group button {
+    width: 36px !important;
+    height: 36px !important;
+  }
+
+  /* Pages and grids. */
+  .page {
+    padding: 14px 12px 48px;
+    gap: 12px;
+  }
+  .page h1 {
+    font-size: 1.35rem;
+  }
+  .two-col,
+  .two-col.even,
+  .three-col,
+  .field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .kpi .big {
+    font-size: 1.3rem;
+  }
+  .dash-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .filter select {
+    min-width: 0;
+    width: 100%;
+  }
+  .hbar {
+    --hbar-label: 110px;
+  }
+  .axis {
+    font-size: 21px; /* chart text is in viewBox units; the SVG is scaled down on phones */
+  }
+  .area-label {
+    font-size: 26px;
+  }
+  .legend-row {
+    gap: 4px 12px;
+  }
+
+  /* Tables: hide secondary columns, and scroll sideways if still too wide. */
+  .hide-sm {
+    display: none;
+  }
+  .show-sm {
+    display: block;
+  }
+  .card table,
+  .report table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  th,
+  td {
+    padding: 6px;
+  }
+
+  /* Forms. */
+  .two,
+  .four {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .victim-row {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.8fr) minmax(0, 1fr);
+  }
+  .victim-row .inline-check,
+  .victim-row button {
+    grid-row: 2;
+  }
+  .decide .inline {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .report-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .report {
+    padding: 16px;
+  }
+  .report h1 {
+    font-size: 1.25rem;
+  }
+
+  .segmented.small button {
+    min-height: 38px;
+  }
+
+  /* Map page: map on top, sidebar below. */
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 48vh auto;
+    height: auto;
+    min-height: 100%;
+  }
+  .sidebar {
+    overflow: visible;
+  }
+  .sidebar > header {
+    display: none; /* the top bar already names the app */
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }

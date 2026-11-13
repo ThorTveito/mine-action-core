@@ -84,7 +84,7 @@ export default function TopologyPage({ onShow }: { onShow: (focus: Omit<MapFocus
               <thead>
                 <tr>
                   <th>Severity</th>
-                  <th>Rule</th>
+                  <th className="hide-sm">Rule</th>
                   <th>Issue</th>
                   <th />
                 </tr>
@@ -95,7 +95,7 @@ export default function TopologyPage({ onShow }: { onShow: (focus: Omit<MapFocus
                     <td>
                       <span className={`badge ${i.severity === "error" ? "rejected" : ""}`}>{i.severity}</span>
                     </td>
-                    <td>
+                    <td className="hide-sm">
                       <code title={RULE_HELP[i.rule]}>{i.rule}</code>
                     </td>
                     <td>{i.message}</td>
@@ -127,8 +127,8 @@ export default function TopologyPage({ onShow }: { onShow: (focus: Omit<MapFocus
                   <th>Hazards</th>
                   <th>Members</th>
                   <th className="num">Total area</th>
-                  <th className="num">Shared edge</th>
-                  <th>Status mix</th>
+                  <th className="num hide-sm">Shared edge</th>
+                  <th className="hide-sm">Status mix</th>
                 </tr>
               </thead>
               <tbody>
@@ -143,8 +143,8 @@ export default function TopologyPage({ onShow }: { onShow: (focus: Omit<MapFocus
                       ))}
                     </td>
                     <td className="num">{fmtArea(c.total_area_m2)}</td>
-                    <td className="num">{Math.round(c.shared_boundary_m)} m</td>
-                    <td>
+                    <td className="num hide-sm">{Math.round(c.shared_boundary_m)} m</td>
+                    <td className="hide-sm">
                       {Object.entries(c.status_counts).map(([s, n]) => (
                         <span key={s} className="legend-chip">
                           <span className="dot" style={{ background: STATUS_COLOR[s as HazardStatus] }} />

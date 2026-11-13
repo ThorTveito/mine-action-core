@@ -255,7 +255,7 @@ export default function CasualtiesPage({ onShow }: { onShow: (f: Omit<MapFocus, 
               <tr>
                 <th>Code</th>
                 <th>Date</th>
-                <th>Activity</th>
+                <th className="hide-sm">Activity</th>
                 <th className="num">Killed</th>
                 <th className="num">Injured</th>
                 <th>Hazard</th>
@@ -270,7 +270,7 @@ export default function CasualtiesPage({ onShow }: { onShow: (f: Omit<MapFocus, 
                     </button>
                   </td>
                   <td>{a.occurred_on}</td>
-                  <td>{a.activity}</td>
+                  <td className="hide-sm">{a.activity}</td>
                   <td className="num">{a.killed}</td>
                   <td className="num">{a.injured}</td>
                   <td>{a.hazard_code ?? <span className="muted">none nearby</span>}</td>
@@ -286,7 +286,7 @@ export default function CasualtiesPage({ onShow }: { onShow: (f: Omit<MapFocus, 
               <tr>
                 <th>Code</th>
                 <th>Date</th>
-                <th>Region</th>
+                <th className="hide-sm">Region</th>
                 <th className="num">Girls</th>
                 <th className="num">Boys</th>
                 <th className="num">Women</th>
@@ -298,7 +298,7 @@ export default function CasualtiesPage({ onShow }: { onShow: (f: Omit<MapFocus, 
                 <tr key={s.id}>
                   <td>{s.code}</td>
                   <td>{s.held_on}</td>
-                  <td>{s.region ?? "–"}</td>
+                  <td className="hide-sm">{s.region ?? "–"}</td>
                   <td className="num">{s.girls}</td>
                   <td className="num">{s.boys}</td>
                   <td className="num">{s.women}</td>

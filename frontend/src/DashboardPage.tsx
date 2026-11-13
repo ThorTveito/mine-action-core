@@ -210,7 +210,9 @@ function Sadd({ grid }: { grid: Record<string, number> }) {
     <table className="sadd">
       <thead>
         <tr>
-          <th>Sex \ age</th>
+          <th>
+            <span className="sr-only">Sex</span>
+          </th>
           <th className="num">Child (&lt;18)</th>
           <th className="num">Adult</th>
           <th className="num">Age unknown</th>
@@ -319,6 +321,34 @@ export default function DashboardPage({
         />
       </div>
 
+      <header className="group-head">
+        <h2>Contamination and land release</h2>
+      </header>
+
+      <section className="card">
+        <h3>Land by hazard status</h3>
+        <div className="stack gapped" role="img" aria-label="Area by hazard status">
+          {STATUS_ORDER.map((s) =>
+            data.area_by_status[s] > 0 ? (
+              <div
+                key={s}
+                style={{ width: `${(100 * data.area_by_status[s]) / statusTotal}%`, background: STATUS_COLOR[s] }}
+                title={`${STATUS_LABEL[s]}: ${fmtArea(data.area_by_status[s])}`}
+              />
+            ) : null,
+          )}
+        </div>
+        <div className="legend-row">
+          {STATUS_ORDER.map((s) => (
+            <span key={s}>
+              <span className="swatch" style={{ background: STATUS_COLOR[s] }} />
+              {STATUS_LABEL[s]} <strong>{fmtArea(data.area_by_status[s])}</strong>{" "}
+              <span className="muted">({data.hazards_by_status[s]} hazards)</span>
+            </span>
+          ))}
+        </div>
+      </section>
+
       <div className="two-col">
         <section className="card">
           <h3>Land released per year, by method</h3>
@@ -377,7 +407,7 @@ export default function DashboardPage({
                 <th className="num">#</th>
                 <th>Hazard</th>
                 <th>Score</th>
-                <th>Main reason</th>
+                <th className="hide-sm">Main reason</th>
               </tr>
             </thead>
             <tbody>
@@ -397,11 +427,12 @@ export default function DashboardPage({
                       <div className="muted">
                         {p.name} · {STATUS_LABEL[p.status]}
                       </div>
+                      <div className="muted show-sm">{top?.[1].why}</div>
                     </td>
                     <td>
                       <Bar label="" value={p.score} max={100} text={p.score.toFixed(0)} color={SERIES} />
                     </td>
-                    <td className="muted">{top?.[1].why}</td>
+                    <td className="muted hide-sm">{top?.[1].why}</td>
                   </tr>
                 );
               })}
@@ -409,91 +440,6 @@ export default function DashboardPage({
           </table>
         </section>
       </div>
-
-      <div className="two-col">
-        <section className="card">
-          <h3>Casualties per year</h3>
-          <StackedBars
-            rows={data.casualties.by_year}
-            x={(r) => String(r.year)}
-            series={[
-              { key: "injured", label: "Injured", color: OUTCOME_COLOR.injured },
-              { key: "killed", label: "Killed", color: OUTCOME_COLOR.killed },
-            ]}
-            value={(r, k) => r[k as "killed" | "injured"]}
-            format={fmtInt}
-            ariaLabel="Casualties per year"
-          />
-          <p className="muted note">
-            {data.casualties.accidents} accidents. {data.casualties.deminers} casualties were deminers, reported separately
-            from civilians. Victims are recorded without names: sex, age and outcome only.
-          </p>
-        </section>
-        <section className="card">
-          <h3>Who is hurt</h3>
-          <Sadd grid={data.casualties.sadd} />
-          <h3>What they were doing</h3>
-          {Object.entries(data.casualties.by_activity)
-            .sort((a, b) => b[1] - a[1])
-            .map(([a, n]) => (
-              <Bar
-                key={a}
-                label={ACTIVITY_LABEL[a] ?? a}
-                value={n}
-                max={Math.max(1, ...Object.values(data.casualties.by_activity))}
-                text={String(n)}
-                color={SERIES}
-              />
-            ))}
-        </section>
-      </div>
-
-      <section className="card">
-        <h3>Explosive ordnance risk education</h3>
-        <div className="eore">
-          {(["girls", "boys", "women", "men"] as const).map((k, i) => (
-            <Bar
-              key={k}
-              label={k[0].toUpperCase() + k.slice(1)}
-              value={data.risk_education[k]}
-              max={Math.max(1, data.risk_education.girls, data.risk_education.boys, data.risk_education.women, data.risk_education.men)}
-              text={fmtInt(data.risk_education[k])}
-              color={i < 2 ? CATEGORICAL[0] : CATEGORICAL[1]}
-            />
-          ))}
-        </div>
-        <p className="muted note">
-          {fmtInt(data.risk_education.total)} people in {data.risk_education.sessions} sessions
-          {data.risk_education.by_year.length > 0 &&
-            ` (${data.risk_education.by_year.map((y) => `${y.year}: ${fmtInt(y.people)}`).join(", ")})`}
-          . Children are shown in blue, adults in orange. Risk education targets the activities in which people are
-          hurt.
-        </p>
-      </section>
-
-      <section className="card">
-        <h3>Land by hazard status</h3>
-        <div className="stack gapped" role="img" aria-label="Area by hazard status">
-          {STATUS_ORDER.map((s) =>
-            data.area_by_status[s] > 0 ? (
-              <div
-                key={s}
-                style={{ width: `${(100 * data.area_by_status[s]) / statusTotal}%`, background: STATUS_COLOR[s] }}
-                title={`${STATUS_LABEL[s]}: ${fmtArea(data.area_by_status[s])}`}
-              />
-            ) : null,
-          )}
-        </div>
-        <div className="legend-row">
-          {STATUS_ORDER.map((s) => (
-            <span key={s}>
-              <span className="swatch" style={{ background: STATUS_COLOR[s] }} />
-              {STATUS_LABEL[s]} <strong>{fmtArea(data.area_by_status[s])}</strong>{" "}
-              <span className="muted">({data.hazards_by_status[s]} hazards)</span>
-            </span>
-          ))}
-        </div>
-      </section>
 
       <div className="two-col">
         <section className="card">
@@ -542,10 +488,10 @@ export default function DashboardPage({
             <tr>
               <th>Region</th>
               <th className="num">Hazards</th>
-              <th>Released vs remaining</th>
+              <th className="hide-sm">Released vs remaining</th>
               <th className="num">Released</th>
               <th className="num">Remaining</th>
-              <th className="num">Cleared (records)</th>
+              <th className="num hide-sm">Cleared (records)</th>
             </tr>
           </thead>
           <tbody>
@@ -561,7 +507,7 @@ export default function DashboardPage({
                   )}
                 </td>
                 <td className="num">{r.hazard_count}</td>
-                <td>
+                <td className="hide-sm">
                   <div className="stack small gapped" style={{ width: `${(100 * r.total_area_m2) / maxRegion}%` }}>
                     <div style={{ flex: r.released_area_m2, background: STATUS_COLOR.released }} />
                     <div style={{ flex: r.remaining_area_m2, background: STATUS_COLOR.confirmed }} />
@@ -569,7 +515,7 @@ export default function DashboardPage({
                 </td>
                 <td className="num">{fmtArea(r.released_area_m2)}</td>
                 <td className="num">{fmtArea(r.remaining_area_m2)}</td>
-                <td className="num">{fmtArea(r.cleared_area_m2)}</td>
+                <td className="num hide-sm">{fmtArea(r.cleared_area_m2)}</td>
               </tr>
             ))}
           </tbody>
@@ -584,6 +530,10 @@ export default function DashboardPage({
         </div>
       </section>
 
+      <header className="group-head">
+        <h2>Operations</h2>
+      </header>
+
       <section className="card">
         <h3>Operators</h3>
         {data.organisations.length === 0 ? (
@@ -594,8 +544,8 @@ export default function DashboardPage({
               <tr>
                 <th>Organisation</th>
                 <th className="num">Tasks</th>
-                <th className="num">Open</th>
-                <th className="num">Completed</th>
+                <th className="num hide-sm">Open</th>
+                <th className="num hide-sm">Completed</th>
                 <th>Area cleared</th>
                 <th className="num">Items destroyed</th>
               </tr>
@@ -605,8 +555,8 @@ export default function DashboardPage({
                 <tr key={o.organisation}>
                   <td>{o.organisation}</td>
                   <td className="num">{o.tasks}</td>
-                  <td className="num">{o.active_tasks}</td>
-                  <td className="num">{o.completed_tasks}</td>
+                  <td className="num hide-sm">{o.active_tasks}</td>
+                  <td className="num hide-sm">{o.completed_tasks}</td>
                   <td>
                     <HBar label="" value={o.cleared_area_m2} max={maxOrg} text={fmtArea(o.cleared_area_m2)} />
                   </td>
@@ -617,6 +567,77 @@ export default function DashboardPage({
           </table>
         )}
       </section>
+
+      <header className="group-head">
+        <h2>People</h2>
+        <p className="muted">Casualties and risk education. Counts only: no names or individual records are public.</p>
+      </header>
+
+      <div className="two-col">
+        <section className="card">
+          <h3>Casualties per year</h3>
+          <StackedBars
+            rows={data.casualties.by_year}
+            x={(r) => String(r.year)}
+            series={[
+              { key: "injured", label: "Injured", color: OUTCOME_COLOR.injured },
+              { key: "killed", label: "Killed", color: OUTCOME_COLOR.killed },
+            ]}
+            value={(r, k) => r[k as "killed" | "injured"]}
+            format={fmtInt}
+            ariaLabel="Casualties per year"
+          />
+          <p className="muted note">
+            {data.casualties.accidents} accidents. {data.casualties.deminers}{" "}
+            {data.casualties.deminers === 1 ? "casualty was a deminer" : "casualties were deminers"}, reported separately from
+            civilians. Victims are recorded without names: sex, age and outcome only.
+          </p>
+        </section>
+        <section className="card">
+          <h3>Who is hurt</h3>
+          <Sadd grid={data.casualties.sadd} />
+          <h3>What they were doing</h3>
+          {Object.entries(data.casualties.by_activity)
+            .sort((a, b) => b[1] - a[1])
+            .map(([a, n]) => (
+              <Bar
+                key={a}
+                label={ACTIVITY_LABEL[a] ?? a}
+                value={n}
+                max={Math.max(1, ...Object.values(data.casualties.by_activity))}
+                text={String(n)}
+                color={SERIES}
+              />
+            ))}
+        </section>
+      </div>
+
+      <section className="card">
+        <h3>Explosive ordnance risk education</h3>
+        <div className="eore">
+          {(["girls", "boys", "women", "men"] as const).map((k, i) => (
+            <Bar
+              key={k}
+              label={k[0].toUpperCase() + k.slice(1)}
+              value={data.risk_education[k]}
+              max={Math.max(1, data.risk_education.girls, data.risk_education.boys, data.risk_education.women, data.risk_education.men)}
+              text={fmtInt(data.risk_education[k])}
+              color={i < 2 ? CATEGORICAL[0] : CATEGORICAL[1]}
+            />
+          ))}
+        </div>
+        <p className="muted note">
+          {fmtInt(data.risk_education.total)} people in {data.risk_education.sessions} sessions
+          {data.risk_education.by_year.length > 0 &&
+            ` (${data.risk_education.by_year.map((y) => `${y.year}: ${fmtInt(y.people)}`).join(", ")})`}
+          . Children are shown in blue, adults in orange. Risk education targets the activities in which people are
+          hurt.
+        </p>
+      </section>
+
+      <header className="group-head">
+        <h2>Quality and data</h2>
+      </header>
 
       <div className="three-col">
         <section className="card">

@@ -46,7 +46,15 @@ const localNow = () => {
 
 // ------------------------------------------------------------------------- the form
 
-function ReportForm({ onQueued, onSent }: { onQueued: () => void; onSent: () => void }) {
+function ReportForm({
+  onQueued,
+  onSent,
+  showTitle,
+}: {
+  onQueued: () => void;
+  onSent: () => void;
+  showTitle: boolean;
+}) {
   const [finding, setFinding] = useState<FindingType>("item_found");
   const [item, setItem] = useState<ItemCategory | "">("");
   const [quantity, setQuantity] = useState("1");
@@ -136,7 +144,7 @@ function ReportForm({ onQueued, onSent }: { onQueued: () => void; onSent: () => 
 
   return (
     <section className="card field-form">
-      <h2>Register a finding</h2>
+      {showTitle && <h2>Register a finding</h2>}
       <p className="safety">⚠ Do not touch or move anything. Mark the spot from a safe distance, then report.</p>
 
       <div className="segmented" role="radiogroup" aria-label="What did you find?">
@@ -520,7 +528,7 @@ export default function FieldPage({ onShow }: { onShow: (f: Omit<MapFocus, "nonc
       <div className={staff && can("report") ? "field-grid" : ""}>
         {can("report") && (
           <div>
-            <ReportForm onQueued={refresh} onSent={refresh} />
+            <ReportForm onQueued={refresh} onSent={refresh} showTitle={staff} />
             <Outbox items={outbox} onChange={refresh} />
           </div>
         )}
