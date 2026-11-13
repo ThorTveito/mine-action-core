@@ -52,6 +52,9 @@ and whether the point is inside). Then:
   the point (default 50 m). The hazard class follows the item (AP mine → anti-personnel, ...),
   and the region is taken from the nearest existing hazard. Spatial errors the new area
   causes (for example an overlap) are returned as warnings, or
+- **Record an accident** (for accident reports): victims by sex, age and outcome, and the activity
+  at the time. The accident is linked to the hazard containing the point or the nearest within
+  500 m; the report's own text stays in the report, or
 - **Reject** with a reason (duplicate, not credible, ...).
 
 Decisions are final (409 on a second decision) and audited with the reviewer, and the reporter

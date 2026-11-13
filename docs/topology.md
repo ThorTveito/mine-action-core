@@ -23,6 +23,7 @@ geodesic (metres, square metres), never degrees. Cancelled hazards are ignored e
 | `tiny_hole` | warning | A small interior hole | below 25 m² |
 | `spike` | warning | A needle-like vertex | interior angle below 5° |
 | `duplicate_vertices` | info | Consecutive vertices at the same position | any |
+| `region_mismatch` | warning | The hazard's recorded region differs from the administrative area its interior point lies in | admin areas loaded |
 
 Shared edges are **not** a problem: two hazards that touch along a boundary are
 *adjacent*, which is normal for contiguous contamination.

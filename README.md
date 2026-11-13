@@ -1,136 +1,192 @@
 # mine-action-core
 
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![CI](https://github.com/ThorTveito/mine-action-core/actions/workflows/ci.yml/badge.svg)](https://github.com/ThorTveito/mine-action-core/actions/workflows/ci.yml)
 
-An **IMSMA-inspired** mine action information management system: track hazardous
-areas, the tasks assigned to them, the clearance work done and its QA, on a map with 3D terrain.
+**An open-source take on the core ideas of a national mine action information management
+system**, inspired by GICHD's IMSMA Core and the International Mine Action Standards (IMAS):
+hazardous areas, land release, quality management, field reporting, accidents and victims,
+risk education, prioritisation and reporting, built on PostgreSQL/PostGIS, FastAPI and
+React + MapLibre.
 
-> Independent portfolio project. Not affiliated with or endorsed by GICHD, and
-> not a copy of IMSMA. All data is **synthetic**: the country of Karvonia and every record
-> are fictional.
-> (Replace `OWNER/REPO` in the badge above after pushing to GitHub.)
+> Independent portfolio project. Not affiliated with or endorsed by GICHD, and not a copy of
+> IMSMA. All data is **synthetic**: the country of Karvonia and every record are fictional.
 
-## What it does
+![Progress dashboard](docs/images/dashboard.jpg)
 
-| Area | Highlights |
-|------|-----------|
-| **Map** | Hazards by status, **3D terrain with relief shading**, spatial-issue and field-report markers, and a **searchable, sortable list of every item** (optionally only what is in view) that zooms to whatever you pick |
-| **Lifecycle** | `suspected → confirmed → in_clearance → released` (or `cancelled`), enforced identically by the API and the importer |
-| **QA/QC** | Inspections on clearance tasks; a hazard can only be released after a **passing** latest inspection, with no open tasks and no spatial errors |
-| **Field reports** | Surveyors register findings on a phone with GPS; reports queue **offline** and send themselves later without duplicates; IM staff triage them against nearby hazards into a new suspected area, a link, or a rejection ([docs/field-reports.md](docs/field-reports.md)) |
-| **Roles** | viewer / surveyor / editor / QA officer / admin. Hazard data is public to read; field reports are not; data entry is separated from QA and release |
-| **Import** | CSV (WKT) or GeoJSON, dry run by default, per-row rejection report, CRS reprojection, duplicate and overlap detection, role-aware |
-| **Spatial checks** | Overlaps, release conflicts, near-miss gaps, slivers, spikes, tiny areas; adjacency and contiguous clusters ([docs/topology.md](docs/topology.md)) |
-| **Audit trail** | Every create/update/delete with old and new values, source (`api`, `import:<id>`, `seed`) and **who** did it |
-| **Dashboard & reports** | Public and filterable by region: release progress, land by status and threat type, clearance per month (with table view and a rough time-to-clear estimate), operators, QA pass rate, field report and data-quality summaries, recent activity; downloadable reports and re-importable exports |
-| **Ops** | One-container production image, Fly.io example, CI with lint, tests against PostGIS and a 90% coverage floor |
+## Why this project
 
-## Stack
+Information management decides where deminers go next. A mine action IM system has to answer
+three questions reliably: *where is the contamination, how much land has been released and how,
+and who is being hurt.* This project models that end to end and focuses on the parts that are
+easy to get wrong:
 
-PostgreSQL 16 + PostGIS · FastAPI · SQLAlchemy 2 + GeoAlchemy2 · Alembic · Shapely + pyproj ·
-PyJWT · React + TypeScript · MapLibre GL · Docker Compose · pytest · GitHub Actions
+- **Land release, not just "clearance"** (IMAS 07.11). Land is *cancelled* by non-technical
+  survey, *reduced* by technical survey or *cleared*; the dashboard and annual report keep the
+  three apart, because releasing land by survey is far cheaper than clearing it.
+- **Data you can trust.** Geometry is validated at the boundary, imports produce a row-by-row
+  rejection report, spatial rules catch overlaps and slivers, and a hazard cannot be released
+  until QA has passed and its topology is clean.
+- **Separation of duties.** Whoever enters or clears data cannot sign it off: release is a
+  QA-officer permission.
+- **Field data under bad connectivity.** Surveyors report from a phone; reports queue offline
+  and resend without duplicates.
+- **Privacy by design.** Victims are recorded without names; field reports and accidents are
+  staff-only; the public sees aggregates, disaggregated by sex and age.
+
+## What is in it
+
+| Area | What you can do |
+|------|-----------------|
+| **Map** | Hazards by status on **3D terrain**, administrative boundaries, accidents, field reports and spatial-issue markers; a searchable list of every item sorted by priority |
+| **Land release** | Non-technical survey, technical survey and clearance tasks; land-release records whose method follows the task type; per-hazard progress; a hazard can never release more than its area |
+| **Quality management** | QA/QC inspections on technical survey and clearance; release needs a passing latest inspection |
+| **Field reports** | Phone-friendly form with GPS, offline outbox, triage into a new suspected area, a link to a hazard, or an accident record |
+| **Accidents & victims** | Accidents linked to the nearest hazard, victims by sex, age and outcome (no names), deminer casualties kept separate |
+| **Risk education** | EORE sessions with girls / boys / women / men counts |
+| **Prioritisation** | Transparent 0–100 score per open hazard (casualties nearby, recent reports, threat, evidence, size) with every component explained |
+| **Spatial checks** | Overlaps, release conflicts, near-miss gaps, slivers, spikes, tiny areas, region mismatches; adjacency and contiguous clusters |
+| **Gazetteer** | Administrative areas as polygons; hazards, accidents and sessions get their region by point-in-polygon |
+| **Import** | CSV (WKT) or GeoJSON, dry run by default, CRS reprojection, duplicate/overlap detection, rejection report |
+| **Reporting** | Public dashboard (filterable by region, with a choropleth), annual report laid out like an APMBC Article 7 report, CSV/GeoJSON exports |
+| **Audit** | Every change with old and new values, source and actor; private history hidden from the public |
+| **Roles** | viewer, surveyor, editor (IM officer), QA officer, admin |
+
+<table>
+  <tr>
+    <td><img src="docs/images/map-3d-terrain.jpg" alt="3D terrain map with hazards"></td>
+    <td><img src="docs/images/priorities.jpg" alt="Choropleth and top priorities"></td>
+  </tr>
+  <tr>
+    <td align="center">3D terrain with hazards draped on the relief</td>
+    <td align="center">Remaining contamination by area, and explainable priorities</td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/import-report.jpg" alt="Import rejection report"></td>
+    <td><img src="docs/images/spatial-overlap.jpg" alt="Overlap found by the spatial checks"></td>
+  </tr>
+  <tr>
+    <td align="center">Import dry run with a row-by-row rejection report</td>
+    <td align="center">A spatial check flags two overlapping hazards</td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/field-report-in-released-land.jpg" alt="Field report inside a released hazard"></td>
+    <td><img src="docs/images/accidents-eore.jpg" alt="Accidents and risk education"></td>
+  </tr>
+  <tr>
+    <td align="center">A field report (purple) inside released land is flagged for investigation</td>
+    <td align="center">Accidents (victims without names) and risk education sessions</td>
+  </tr>
+</table>
 
 ## Quick start
 
-Requires Docker (with Compose).
+Requires Docker with Compose.
 
 ```bash
-make up      # builds and starts db, API, and frontend
-make seed    # loads synthetic data, topology test cases and demo accounts
+make up      # PostGIS, API and frontend
+make seed    # synthetic Karvonia: hazards, tasks, QA, field reports, accidents, EORE, users
 ```
 
-- App: http://localhost:5173 (click **Log in**; demo accounts are listed on the form)
-- API docs (Swagger, with an Authorize button): http://localhost:8000/docs
-- Tests: `make test` · coverage: `make coverage` · lint: `make lint`
+- App: http://localhost:5173 · API docs (Swagger, with Authorize): http://localhost:8000/docs
+- Demo accounts (local only), password `demo-password`, also listed on the login form:
 
-Demo accounts (local dev only, password `demo-password`): `viewer`, `surveyor`, `editor`, `qa`, `admin`.
+| Account | Role | Try this |
+|---------|------|----------|
+| `surveyor` | Field surveyor | On a phone-sized window, send a finding, then send one with the network off |
+| `editor` | IM officer | Review the field report inbox; add a technical survey task to a hazard and record land released |
+| `qa` | QA officer | Record a passing inspection, then release the hazard |
+| `viewer` | Viewer | Read-only access |
+| `admin` | Admin | Everything, including deletes and users |
 
-- Log in as `surveyor` on a phone-sized window: you land on the report form. Send a finding,
-  then try it with the network off (it queues and sends when you are back online).
-- Log in as `editor`, open **Field reports**, and review the inbox: one report lies inside released land.
-- Try releasing a hazard as `editor` (refused), then as `qa` after recording a passing inspection.
+## A hazard's life, end to end
 
-### Try the 3D terrain
+This is also an automated test ([`test_lifecycle.py`](backend/tests/test_lifecycle.py)):
 
-Tick **3D terrain and relief shading** in the sidebar. Drag with the right mouse button (or
-Ctrl + drag) to tilt and rotate; use the slider for vertical exaggeration. The seed sits on
-mountainous terrain in central Norway so there is relief to see; Karvonia itself is fictional.
-
-### Try the import
-
-Log in as `editor`, open **Import**, and upload a file from [samples/](samples/). Dry run first, then commit.
+```mermaid
+flowchart LR
+    FR[Field report<br/>surveyor, offline-capable] -->|triage| SHA[Suspected hazard<br/>SHA]
+    SHA -->|non-technical survey<br/>no evidence| CAN[Cancelled<br/>land cancelled]
+    SHA -->|non-technical survey<br/>evidence| CHA[Confirmed hazard<br/>CHA]
+    CHA -->|technical survey| RED[Land reduced]
+    CHA -->|clearance| CLR[Land cleared]
+    RED --> QA{QA passes?<br/>topology clean?}
+    CLR --> QA
+    QA -->|yes, QA officer| REL[Released]
+    QA -->|no| CHA
+```
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    subgraph Browser
+        UI[React + TypeScript<br/>lazy-loaded tabs]
+        ML[MapLibre GL<br/>3D terrain, vector layers]
+        OB[(Offline outbox<br/>localStorage)]
+    end
+    subgraph API[FastAPI]
+        R[Routers<br/>JWT auth, role permissions]
+        RULES[rules.py<br/>lifecycle, QA, release gate]
+        TOPO[topology.py<br/>spatial checks]
+        PRIO[priority.py<br/>explainable scoring]
+        AN[analytics.py<br/>aggregates only]
+        IMP[importer.py<br/>parse, validate, apply]
+    end
+    DB[(PostgreSQL 16 + PostGIS<br/>GiST indexes, geography maths)]
+    UI --> R
+    OB -. resend, idempotent .-> R
+    R --> RULES & TOPO & PRIO & AN & IMP
+    RULES & TOPO & PRIO & AN & IMP --> DB
+    ML --> OSM[OpenStreetMap tiles]
+    ML --> DEM[AWS terrain tiles]
 ```
-React + MapLibre (3D terrain from raster-dem tiles)
-        │  /api  (JWT bearer, role-based permissions)
-        ▼
-     FastAPI ──routers──▶ rules.py (lifecycle, QA, release gate)
-        │                 topology.py (PostGIS spatial checks)
-        │                 importer.py (parse → validate → apply)
-        ▼
-PostgreSQL + PostGIS:  hazards ─< tasks ─< clearance_records
-                          │        └─< qa_inspections       users · audit_log
-                          └─< field_reports (point, from the field; reviewed into hazards)
+
+The data model is in [docs/data-model.md](docs/data-model.md); how each part maps to IMSMA
+and IMAS concepts is in [docs/imsma-concepts.md](docs/imsma-concepts.md).
+
+## Engineering
+
+- **Tests:** 184 backend tests against a real PostGIS (98% coverage, CI floor 90%),
+  including a full lifecycle story, permission matrices and spatial edge cases; Vitest unit tests
+  for the offline outbox, time-series handling and the permission matrix.
+- **Spatial work in the database:** geodesic areas and distances (`geography`), GiST-indexed
+  prefilters, `ST_Intersection`/`ST_DWithin`/`ST_Contains`, KNN (`<->`), geodesic buffers,
+  Voronoi-based synthetic boundaries, `ST_SimplifyPreserveTopology` for the choropleth.
+- **Security:** scrypt password hashing, JWT, role-based permissions with separation of duties,
+  login throttling, security headers and a strict Content Security Policy in production,
+  spreadsheet formula-injection protection on CSV exports, no personal data in public responses.
+- **Delivery:** one production container (API + built frontend), Fly.io example, GitHub Actions
+  (lint, format, tests with coverage, frontend tests and build, image build), pre-commit hooks.
+- **Decisions are written down:** [docs/adr/](docs/adr/).
+
+```bash
+make check   # everything CI runs: lint, format check, backend tests, frontend tests and build
 ```
 
-| Entity | Purpose |
-|--------|---------|
-| `hazards` | Suspected/confirmed hazardous areas (`MULTIPOLYGON`, EPSG:4326), with geodesic `area_m2` |
-| `tasks` | Survey, clearance or verification work against one hazard |
-| `clearance_records` | Dated reports of area cleared and items found/destroyed under a task |
-| `qa_inspections` | QA/QC sampling of a clearance task: sample area, residual items, pass/fail |
-| `field_reports` | Findings from surveyors (GPS point, item, source), with review outcome and linked hazard |
-| `users` | Accounts with a role (scrypt-hashed passwords) |
-| `audit_log` | Append-only change history with source and actor |
+## Documentation
 
-Terminology is in [docs/glossary.md](docs/glossary.md).
+| Document | About |
+|----------|-------|
+| [docs/imsma-concepts.md](docs/imsma-concepts.md) | How the IMSMA Core / IMAS concepts map onto this code |
+| [docs/data-model.md](docs/data-model.md) | Entities and relations |
+| [docs/topology.md](docs/topology.md) | Spatial checks: rules and thresholds |
+| [docs/prioritisation.md](docs/prioritisation.md) | The priority score and its limits |
+| [docs/field-reports.md](docs/field-reports.md) | Field reporting, offline outbox, triage |
+| [docs/DEPLOY.md](docs/DEPLOY.md) | Deploying the single-container demo |
+| [docs/adr/](docs/adr/) | Architecture decision records |
+| [docs/glossary.md](docs/glossary.md) | Terms used in the code and UI |
+| [AGENTS.md](AGENTS.md) | Conventions for contributors (and coding agents) |
 
-## Design decisions
+## Limitations and next steps
 
-- **Geometry validation at the boundary.** All client geometry passes through `app/geo.py`
-  (self-intersections, non-polygon types, out-of-range coordinates such as projected metres sent as lon/lat).
-- **Geodesic measurements.** Areas, perimeters and distances use PostGIS `geography`, so they are real
-  metres, not degrees.
-- **Real PostGIS in tests.** Spatial behaviour is the point, so tests run against a real database.
-- **One rule set, two entry points.** Lifecycle, QA and release rules live in `app/rules.py` and are called by
-  both the REST API and the importer, so there is no back door around them.
-- **Separation of duties.** Whoever enters or clears data cannot sign it off: release needs the `release`
-  permission (QA officer/admin), and QA inspections need `qa`. Editors have neither.
-- **Errors block, warnings inform.** Spatial errors (overlaps, release conflicts) stop a release; warnings
-  (slivers, near misses) only appear in reports and imports.
-- **Duplicates vs overlaps.** IoU >= 0.9 means the same hazard (rejected); a smaller overlap is a warning
-  because adjacent hazards legitimately touch.
-- **Validation never writes.** `importer.validate` is side-effect free, which makes dry runs trustworthy.
-- **Reads public, writes authenticated.** Visitors can browse the demo; every change is attributable.
-- **Public means aggregates.** The public dashboard shows counts and areas only. Field report
-  text, report locations and user names never appear in public responses, including the audit
-  log and hazards created from reports (tests check this).
-- **Offline-first field capture.** Field reports get a device-generated id and the server treats
-  repeats as the same report, so the outbox can retry blindly without duplicates.
-- **Small first load.** Each tab is lazy-loaded; the map engine (~800 kB) only downloads with the
-  Map tab, so the field form opens fast on a weak connection (about 50 kB gzipped to start).
-- **Spreadsheet-safe exports.** Text cells starting with `= + - @` are neutralised against CSV formula injection.
-- **String enums + CHECK constraints** and **hand-written, reversible migrations.**
-
-## Deploying
-
-The repo builds into a single container. See [docs/DEPLOY.md](docs/DEPLOY.md) (Fly.io + Neon example, environment
-variables, what to check before going public). I have built and run the image locally but have **not**
-deployed it to a public host.
-
-## Limitations
-
-- Login throttling (5 failures per username and address per 5 minutes) is in-memory, so it is
-  per process; demo credentials are public in demo mode (see DEPLOY.md).
-- The field outbox works offline, but the app itself must be opened online once (no service worker
-  yet), and field reports have no photo attachments yet.
-- Only hazard status has transition rules; task status is unrestricted.
-- Spatial checks run on demand over all hazards (fine for thousands of polygons, not millions) and never
-  auto-repair geometry.
-- Imports are limited to 5 MB / 5000 rows and run in one request.
-- Seed hazards are placed on real terrain in central Norway, so the basemap shows real place names near
-  fictional hazards. The 3D view uses free public tile servers (OpenStreetMap, AWS terrain tiles) which are
-  fine for development but not for heavy traffic.
-- Not included: a demo GIF and a live URL (both need the owner's accounts).
+- Geometry is created by import, field-report triage or the API; there is no polygon drawing
+  tool in the browser yet.
+- The offline outbox works without a connection, but the app must be opened online once (no
+  service worker yet); field reports have no photos yet.
+- Login throttling is in memory, per process.
+- Spatial checks run on demand over all hazards: fine for thousands of polygons, not millions
+  (vector tiles and incremental checks would be next).
+- Released land is terminal; re-opening after a later find is a decision made outside the app.
+- Prioritisation weights are illustrative, not a national standard.
+- The synthetic country sits on real terrain in central Norway so the 3D view has relief; the
+  basemap therefore shows real place names. No real mine action data is used anywhere.

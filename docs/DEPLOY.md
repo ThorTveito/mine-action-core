@@ -51,6 +51,9 @@ Check `https://<app>.fly.dev/api/health`.
   `POST /api/users`, and the public can still browse (reads are anonymous).
 - **Login throttling** (5 failures per username and address in 5 minutes, then HTTP 429) is
   in-memory per process. With more than one instance, add throttling at the proxy too.
+- **Content Security Policy**: the built frontend is served with a strict CSP that allows only
+  the OpenStreetMap tile server and the AWS terrain tiles. Add any new tile or API host to
+  `backend/app/security_headers.py`.
 - **Field reports must be served over HTTPS** (Fly does this): browsers only give GPS
   positions to secure pages.
 - **Seed location.** The synthetic hazards sit on real mountainous terrain in central Norway

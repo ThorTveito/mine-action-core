@@ -30,8 +30,10 @@ PostgreSQL/PostGIS, with a FastAPI backend and a React + MapLibre frontend.
   gating release, spatial (topology) checks, CSV/GeoJSON exports and reports,
   3D terrain map, single-container deploy config, CI with a coverage floor.
   *Not done:* a deployed live demo (needs the owner's accounts) and a demo GIF.
-- **Since Tier 3:** field reports from surveyors (offline outbox, triage into hazards),
-  login throttling, lazy-loaded tabs, mobile layout, error boundary.
+- **Since Tier 3:** field reports from surveyors (offline outbox, triage), land release by
+  method (NTS/TS/clearance), accidents and victims (SADD), risk education, administrative
+  areas, prioritisation, annual report, security headers/CSP, frontend unit tests.
+  See `docs/imsma-concepts.md` for the domain map and `docs/adr/` for key decisions.
 
 Do not build features beyond the current tier early. If a task would materially
 change scope, ask first.
@@ -58,8 +60,13 @@ backend/            FastAPI app (Python 3.12)
   app/topology.py     spatial checks, adjacency, clusters (PostGIS + shapely)
   app/importer.py     import pipeline: parse -> validate -> apply
   app/bootstrap.py    demo users, first-boot seeding (used by the container)
+  app/analytics.py    aggregates for dashboard + annual report (never personal data)
+  app/priority.py     explainable priority score (weights at the top of the file)
+  app/gazetteer.py    admin-area lookups (point-in-polygon region assignment)
+  app/security_headers.py   security headers + production CSP
   app/routers/        hazards, tasks, clearance, qa, stats (+dashboard), imports,
-                      audit_log, auth_users, topology, exports, field_reports
+                      audit_log, auth_users, topology, exports, field_reports,
+                      casualties (accidents, risk education, admin areas), priorities
   app/seed.py         deterministic synthetic data generator
   alembic/            migrations (hand-written, reviewed)
   tests/              pytest, runs against a real PostGIS database
@@ -71,6 +78,8 @@ frontend/           Vite + React + TypeScript + MapLibre GL
   src/FieldPage.tsx, outbox.ts   field report form, offline outbox, triage inbox
   src/ErrorBoundary.tsx          per-tab crash containment
   src/ItemList.tsx               map sidebar list: search, sort, in-view filter
+  src/CasualtiesPage.tsx, ReportPage.tsx, Choropleth.tsx, charts.tsx, viz.ts
+  src/__tests__/                 Vitest unit tests (npm test)
 samples/            demo import files (assume `make seed` data)
 docs/               glossary.md (keep in sync with enums), topology.md, field-reports.md, DEPLOY.md
 Dockerfile          single-container production image (API + built frontend)
@@ -90,6 +99,8 @@ make test      # backend pytest inside the container
 make coverage  # tests with a coverage report (CI floor is 90%)
 make lint      # ruff
 make image     # build the production Docker image
+make check     # everything CI runs (lint, format, backend + frontend tests, build)
+make format    # ruff format + fixes
 make down      # stop; `make nuke` also deletes the database volume
 make logs      # tail logs
 cd frontend && npm run build   # typecheck + production build
@@ -131,8 +142,15 @@ cd frontend && npm run build   # typecheck + production build
 - Audit rows carry `actor` (username) as well as `source`. Pass the acting
   user into `audit.record` and into `importer.apply`.
 - Release preconditions (`rules.check_release_preconditions`): a completed
-  clearance task, no open tasks, a **passing** latest QA inspection for every
-  completed clearance task, and no error-level spatial issues.
+  technical survey or clearance task, no open tasks, a **passing** latest QA
+  inspection for every completed TS/clearance task, and no error-level spatial issues.
+- Land release: a record's `release_method` is derived from its task type
+  (`RELEASE_METHOD_FOR_TASK`); verification releases nothing; the total released in a
+  hazard may not exceed its area. Report cancelled/reduced/cleared separately, always.
+- Regions come from the gazetteer (`gazetteer.region_for`) when not given. New
+  entities with a location should set `region` the same way.
+- Victims never get names or other identifiers. Accident records are staff-only
+  (`VIEW_REPORTS`); public figures come from `analytics.py` as aggregates.
 - Spatial checks: thresholds are constants at the top of `app/topology.py` and
   documented in `docs/topology.md`; change them together. Warnings never block;
   errors block release.
@@ -192,8 +210,10 @@ cd frontend && npm run build   # typecheck + production build
   comments in `tests/test_topology.py` for the metre equivalents.
 - Geometry validation changes need tests with invalid inputs (self-
   intersecting ring, out-of-range coordinates, wrong geometry type).
-- Before declaring work done: `make test` passes and
-  `cd frontend && npm run build` succeeds.
+- Before declaring work done: `make check` passes (backend tests, ruff lint and
+  format, frontend Vitest and build).
+- `tests/test_lifecycle.py` tells the whole story through the API; extend it when
+  the lifecycle changes.
 
 ## Definition of done for a change
 
