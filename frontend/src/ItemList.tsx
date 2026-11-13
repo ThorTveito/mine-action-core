@@ -5,7 +5,7 @@ import type { HazardCollection, HazardStatus, MapFocus } from "./types";
 
 type Bounds = [number, number, number, number]; // west, south, east, north
 type Kind = "hazards" | "reports";
-type Sort = "code" | "name" | "area" | "status";
+type Sort = "priority" | "code" | "name" | "area" | "status";
 
 const PAGE = 50;
 const STATUS_RANK: Record<HazardStatus, number> = {
@@ -17,7 +17,7 @@ const STATUS_RANK: Record<HazardStatus, number> = {
 };
 const REPORT_COLOR: Record<string, string> = { submitted: "#7c3aed", accepted: "#1f2937", rejected: "#9ca3af" };
 
-function bboxOf(coords: number[][][][]): Bounds {
+export function bboxOf(coords: number[][][][]): Bounds {
   let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity; // prettier-ignore
   for (const poly of coords) for (const ring of poly) for (const [x, y] of ring) {
     if (x < w) w = x;
@@ -37,13 +37,14 @@ interface Props {
   view: Bounds | null;
   selectedId: number | null;
   onPick: (focus: Omit<MapFocus, "nonce">) => void;
+  scores: Map<number, number>; // priority score by hazard id (open hazards only)
 }
 
 /** Every item on the map as a searchable, sortable list, so nothing is missed by eye. */
-export default function ItemList({ hazards, reports, visible, view, selectedId, onPick }: Props) {
+export default function ItemList({ hazards, reports, visible, view, selectedId, onPick, scores }: Props) {
   const [kind, setKind] = useState<Kind>("hazards");
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<Sort>("code");
+  const [sort, setSort] = useState<Sort>("priority");
   const [inView, setInView] = useState(false);
   const [limit, setLimit] = useState(PAGE);
 
@@ -66,13 +67,14 @@ export default function ItemList({ hazards, reports, visible, view, selectedId, 
         (!q || [h.code, h.name, h.region, h.hazard_class, h.status].some((v) => v.toLowerCase().includes(q))),
     );
     const by: Record<Sort, (a: (typeof rows)[number], b: (typeof rows)[number]) => number> = {
+      priority: (a, b) => (scores.get(b.id) ?? -1) - (scores.get(a.id) ?? -1) || a.code.localeCompare(b.code),
       code: (a, b) => a.code.localeCompare(b.code),
       name: (a, b) => a.name.localeCompare(b.name) || a.code.localeCompare(b.code),
       area: (a, b) => b.area_m2 - a.area_m2,
       status: (a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || a.code.localeCompare(b.code),
     };
     return rows.sort(by[sort]);
-  }, [hazardRows, visible, inView, view, q, sort]);
+  }, [hazardRows, visible, inView, view, q, sort, scores]);
 
   const reportList = useMemo(() => {
     const rows = (reports?.features ?? [])
@@ -122,6 +124,7 @@ export default function ItemList({ hazards, reports, visible, view, selectedId, 
         </label>
         {kind === "hazards" && (
           <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="Sort by">
+            <option value="priority">Priority</option>
             <option value="code">Code</option>
             <option value="name">Name</option>
             <option value="area">Largest first</option>
@@ -151,6 +154,11 @@ export default function ItemList({ hazards, reports, visible, view, selectedId, 
                     {STATUS_LABEL[h.status]} · {h.region} · {fmtArea(h.area_m2)}
                   </span>
                 </span>
+                {scores.has(h.id) && (
+                  <span className="score" title="Priority score (0-100)">
+                    {Math.round(scores.get(h.id) ?? 0)}
+                  </span>
+                )}
               </button>
             </li>
           ))}

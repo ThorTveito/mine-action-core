@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { acceptReport, ApiError, createFieldReport, fetchFieldReports, fetchNearby, rejectReport } from "./api";
 import { useAuth } from "./AuthContext";
+import { VictimRows } from "./CasualtiesPage";
 import { discard, enqueue, flushOutbox, isRetryable, loadOutbox, newClientId } from "./outbox";
 import type { QueuedReport } from "./outbox";
 import { STATUS_COLOR, STATUS_LABEL } from "./status";
@@ -11,7 +12,9 @@ import type {
   ItemCategory,
   MapFocus,
   NearbyHazard,
+  AccidentActivity,
   ReportSource,
+  VictimInput,
   ReportStatus,
 } from "./types";
 
@@ -293,6 +296,8 @@ function Triage({ report, onDone, onShow }: { report: FieldReport; onDone: () =>
   const [nearby, setNearby] = useState<NearbyHazard[] | null>(null);
   const [radius, setRadius] = useState("50");
   const [reason, setReason] = useState("");
+  const [victims, setVictims] = useState<VictimInput[]>([{ sex: "unknown", age: null, outcome: "injured", is_deminer: false }]);
+  const [activity, setActivity] = useState<AccidentActivity>("unknown");
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -367,6 +372,31 @@ function Triage({ report, onDone, onShow }: { report: FieldReport; onDone: () =>
               Create SHA
             </button>
           </div>
+          {report.finding_type === "accident" && (
+            <div className="accident-box">
+              <strong>Record as an accident</strong>
+              <VictimRows victims={victims} onChange={setVictims} />
+              <div className="inline">
+                <label>
+                  Activity at the time
+                  <select value={activity} onChange={(e) => setActivity(e.target.value as AccidentActivity)}>
+                    {["farming", "herding", "travelling", "collecting", "playing", "handling", "demining", "other", "unknown"].map((a) => (
+                      <option key={a} value={a}>
+                        {a}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="primary small"
+                  disabled={busy}
+                  onClick={() => act(() => acceptReport(report.id, { mode: "accident", victims, activity }))}
+                >
+                  Record accident
+                </button>
+              </div>
+            </div>
+          )}
           <div className="inline">
             <label>
               Reject, reason

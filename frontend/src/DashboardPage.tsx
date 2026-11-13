@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { fetchDashboard } from "./api";
-import { fmtArea, fmtMonth } from "./format";
+import { fetchAdminAreas, fetchDashboard } from "./api";
+import { HBar as Bar, StackedBars } from "./charts";
+import Choropleth from "./Choropleth";
+import { fillMonths, fmtArea, fmtMonth } from "./format";
 import { STATUS_COLOR, STATUS_LABEL, STATUS_ORDER } from "./status";
 import type { Dashboard, MonthlyClearance } from "./types";
+import { CATEGORICAL, OUTCOME_COLOR, RELEASE_COLOR, RELEASE_LABEL, RELEASE_ORDER } from "./viz";
 
 // One neutral series colour for single-series charts. Deliberately not a status colour.
 const SERIES = "#0f766e";
@@ -56,20 +59,6 @@ function Kpi({ value, label, children }: { value: string; label: string; childre
 // --------------------------------------------------------------------- monthly bars
 
 type Metric = "area" | "items";
-
-/** Continuous months from first to last, zero-filled, so the time axis is not distorted. */
-function fillMonths(data: MonthlyClearance[]): MonthlyClearance[] {
-  if (data.length === 0) return data;
-  const byMonth = new Map(data.map((d) => [d.month, d]));
-  const [y0, m0] = data[0].month.split("-").map(Number);
-  const [y1, m1] = data[data.length - 1].month.split("-").map(Number);
-  const out: MonthlyClearance[] = [];
-  for (let y = y0, m = m0; y < y1 || (y === y1 && m <= m1); m === 12 ? ((m = 1), y++) : m++) {
-    const key = `${y}-${String(m).padStart(2, "0")}`;
-    out.push(byMonth.get(key) ?? { month: key, cleared_area_m2: 0, items_destroyed: 0, items_found: 0 });
-  }
-  return out;
-}
 
 function MonthlyChart({ data: raw }: { data: MonthlyClearance[] }) {
   const data = fillMonths(raw);
@@ -201,10 +190,69 @@ function HBar({ label, value, max, text }: { label: string; value: number; max: 
 
 // ------------------------------------------------------------------------------ page
 
-export default function DashboardPage({ onOpenChecks }: { onOpenChecks?: () => void }) {
+const ACTIVITY_LABEL: Record<string, string> = {
+  farming: "Farming",
+  herding: "Herding",
+  travelling: "Travelling",
+  collecting: "Collecting wood, food or scrap",
+  playing: "Playing",
+  handling: "Handling an item",
+  demining: "Demining",
+  other: "Other",
+  unknown: "Unknown",
+};
+
+function Sadd({ grid }: { grid: Record<string, number> }) {
+  const sexes = ["female", "male", "unknown"] as const;
+  const ages = ["child", "adult", "unknown"] as const;
+  const total = (s: string) => ages.reduce((n, a) => n + (grid[`${s}_${a}`] ?? 0), 0);
+  return (
+    <table className="sadd">
+      <thead>
+        <tr>
+          <th>Sex \ age</th>
+          <th className="num">Child (&lt;18)</th>
+          <th className="num">Adult</th>
+          <th className="num">Age unknown</th>
+          <th className="num">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {sexes.map((s) => (
+          <tr key={s}>
+            <td>{s === "unknown" ? "Sex unknown" : s[0].toUpperCase() + s.slice(1)}</td>
+            {ages.map((a) => (
+              <td key={a} className="num">
+                {grid[`${s}_${a}`] ?? 0}
+              </td>
+            ))}
+            <td className="num">
+              <strong>{total(s)}</strong>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+export default function DashboardPage({
+  onOpenChecks,
+  onOpenHazard,
+}: {
+  onOpenChecks?: () => void;
+  onOpenHazard?: (hazardId: number) => void;
+}) {
   const [region, setRegion] = useState<string>("");
   const [data, setData] = useState<Dashboard | null>(null);
+  const [areas, setAreas] = useState<GeoJSON.FeatureCollection | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchAdminAreas()
+      .then(setAreas)
+      .catch(() => setAreas(null));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -259,15 +307,169 @@ export default function DashboardPage({ onOpenChecks }: { onOpenChecks?: () => v
             <div style={{ width: `${data.release_percent}%`, background: STATUS_COLOR.released }} />
           </div>
         </Kpi>
-        <Kpi value={fmtArea(data.remaining_area_m2)} label={`still contaminated · ${data.open_hazard_count} open hazards`} />
-        <Kpi value={fmtArea(data.released_area_m2)} label="released" />
+        <Kpi value={fmtArea(data.outstanding_area_m2)} label={`still to release · ${data.open_hazard_count} open hazards`} />
+        <Kpi value={fmtArea(data.land_release.total_m2)} label="land released (all methods)" />
         <Kpi value={fmtInt(data.items_destroyed)} label={`items destroyed (${fmtInt(data.items_found)} found)`} />
+        <Kpi value={fmtInt(data.casualties.casualties)} label={`casualties · ${data.casualties.killed} killed, ${data.casualties.injured} injured`} />
+        <Kpi value={fmtInt(data.risk_education.total)} label={`people reached by risk education · ${data.risk_education.sessions} sessions`} />
         <Kpi value={fmtInt(openTasks)} label="open tasks" />
         <Kpi
           value={data.qa.pass_rate === null ? "–" : `${data.qa.pass_rate}%`}
           label={`QA pass rate · ${data.qa.inspections} inspections`}
         />
       </div>
+
+      <div className="two-col">
+        <section className="card">
+          <h3>Land released per year, by method</h3>
+          <StackedBars
+            rows={data.land_release.by_year}
+            x={(r) => String(r.year)}
+            series={RELEASE_ORDER.map((m) => ({ key: m, label: RELEASE_LABEL[m], color: RELEASE_COLOR[m] }))}
+            value={(r, k) => r[k as "cancelled" | "reduced" | "cleared"]}
+            format={fmtArea}
+            ariaLabel="Land released per year by method"
+          />
+          <p className="muted note">
+            Land release (IMAS 07.11): survey that finds no evidence <em>cancels</em> land, technical survey{" "}
+            <em>reduces</em> it, clearance <em>clears</em> it. Releasing land by survey is far cheaper than clearing it.
+          </p>
+        </section>
+        <section className="card">
+          <h3>Land released, all years</h3>
+          {RELEASE_ORDER.map((m) => (
+            <Bar
+              key={m}
+              label={m[0].toUpperCase() + m.slice(1)}
+              value={data.land_release[`${m}_m2` as "cancelled_m2"]}
+              max={Math.max(1, data.land_release.total_m2)}
+              text={`${fmtArea(data.land_release[`${m}_m2` as "cancelled_m2"])} · ${
+                data.land_release.total_m2 ? Math.round((100 * data.land_release[`${m}_m2` as "cancelled_m2"]) / data.land_release.total_m2) : 0
+              }%`}
+              color={RELEASE_COLOR[m]}
+            />
+          ))}
+          <p className="muted note">
+            Cancelled by non-technical survey, reduced by technical survey, cleared by clearance.{" "}
+            {fmtArea(data.outstanding_area_m2)} remains inside open hazards after the land already released from them.
+          </p>
+        </section>
+      </div>
+
+      <div className="two-col even">
+        <section className="card">
+          <h3>Where contamination remains</h3>
+          {areas ? (
+            <Choropleth areas={areas} selected={data.region} onSelect={(r) => setRegion(r ?? "")} />
+          ) : (
+            <p className="muted">Loading map…</p>
+          )}
+        </section>
+        <section className="card">
+          <h3>Top priorities{data.region ? ` in ${data.region}` : ""}</h3>
+          <p className="muted note">
+            Explainable score (0–100) from casualties nearby, recent field reports, threat, evidence and size. Weights
+            are illustrative and published at <code>/api/priorities/weights</code>.
+          </p>
+          <table className="priorities">
+            <thead>
+              <tr>
+                <th className="num">#</th>
+                <th>Hazard</th>
+                <th>Score</th>
+                <th>Main reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.top_priorities.map((p) => {
+                const top = Object.entries(p.components).sort((a, b) => b[1].points - a[1].points)[0];
+                return (
+                  <tr key={p.hazard_id}>
+                    <td className="num">{p.rank}</td>
+                    <td>
+                      {onOpenHazard ? (
+                        <button className="link" onClick={() => onOpenHazard(p.hazard_id)}>
+                          {p.code}
+                        </button>
+                      ) : (
+                        p.code
+                      )}
+                      <div className="muted">
+                        {p.name} · {STATUS_LABEL[p.status]}
+                      </div>
+                    </td>
+                    <td>
+                      <Bar label="" value={p.score} max={100} text={p.score.toFixed(0)} color={SERIES} />
+                    </td>
+                    <td className="muted">{top?.[1].why}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+      </div>
+
+      <div className="two-col">
+        <section className="card">
+          <h3>Casualties per year</h3>
+          <StackedBars
+            rows={data.casualties.by_year}
+            x={(r) => String(r.year)}
+            series={[
+              { key: "injured", label: "Injured", color: OUTCOME_COLOR.injured },
+              { key: "killed", label: "Killed", color: OUTCOME_COLOR.killed },
+            ]}
+            value={(r, k) => r[k as "killed" | "injured"]}
+            format={fmtInt}
+            ariaLabel="Casualties per year"
+          />
+          <p className="muted note">
+            {data.casualties.accidents} accidents. {data.casualties.deminers} casualties were deminers, reported separately
+            from civilians. Victims are recorded without names: sex, age and outcome only.
+          </p>
+        </section>
+        <section className="card">
+          <h3>Who is hurt</h3>
+          <Sadd grid={data.casualties.sadd} />
+          <h3>What they were doing</h3>
+          {Object.entries(data.casualties.by_activity)
+            .sort((a, b) => b[1] - a[1])
+            .map(([a, n]) => (
+              <Bar
+                key={a}
+                label={ACTIVITY_LABEL[a] ?? a}
+                value={n}
+                max={Math.max(1, ...Object.values(data.casualties.by_activity))}
+                text={String(n)}
+                color={SERIES}
+              />
+            ))}
+        </section>
+      </div>
+
+      <section className="card">
+        <h3>Explosive ordnance risk education</h3>
+        <div className="eore">
+          {(["girls", "boys", "women", "men"] as const).map((k, i) => (
+            <Bar
+              key={k}
+              label={k[0].toUpperCase() + k.slice(1)}
+              value={data.risk_education[k]}
+              max={Math.max(1, data.risk_education.girls, data.risk_education.boys, data.risk_education.women, data.risk_education.men)}
+              text={fmtInt(data.risk_education[k])}
+              color={i < 2 ? CATEGORICAL[0] : CATEGORICAL[1]}
+            />
+          ))}
+        </div>
+        <p className="muted note">
+          {fmtInt(data.risk_education.total)} people in {data.risk_education.sessions} sessions
+          {data.risk_education.by_year.length > 0 &&
+            ` (${data.risk_education.by_year.map((y) => `${y.year}: ${fmtInt(y.people)}`).join(", ")})`}
+          . Children are shown in blue, adults in orange. Risk education targets the activities in which people are
+          hurt.
+        </p>
+      </section>
 
       <section className="card">
         <h3>Land by hazard status</h3>

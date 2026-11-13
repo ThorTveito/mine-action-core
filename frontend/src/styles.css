@@ -92,11 +92,16 @@ body {
   min-width: 200px;
 }
 .page.wide .kpis {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+@media (max-width: 900px) {
+  .page.wide .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 @media (min-width: 1150px) {
   .page.wide .kpis {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 @media (max-width: 560px) {
@@ -315,6 +320,216 @@ td .hbar {
 .link.back {
   align-self: flex-start;
   padding: 0;
+}
+
+/* ---- charts, choropleth, priorities ---- */
+.legend-row.compact {
+  margin-top: 0;
+  font-size: 0.8rem;
+}
+.tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tip-key {
+  display: inline-block;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+}
+.two-col.even {
+  grid-template-columns: 1fr 1fr;
+}
+.choropleth svg {
+  max-height: 380px;
+  display: block;
+  margin: 0 auto;
+}
+.choropleth .area {
+  cursor: pointer;
+  transition: opacity 0.1s;
+}
+.choropleth .area:hover,
+.choropleth .area:focus-visible {
+  opacity: 0.85;
+  outline: none;
+}
+.choropleth .area.selected {
+  stroke: #111827;
+  stroke-width: 3;
+}
+.area-label {
+  font-size: 22px; /* viewBox units: the SVG is scaled down to fit */
+  font-weight: 600;
+  fill: var(--text);
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.85);
+  stroke-width: 5px;
+}
+.area-label.on-dark {
+  fill: #ffffff;
+  stroke: rgba(15, 23, 42, 0.55);
+}
+.ramp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.sadd td,
+.sadd th {
+  padding: 5px 8px;
+}
+.priorities .hbar {
+  min-width: 120px;
+}
+.eore {
+  max-width: 560px;
+}
+.priority-card {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.priority-card .big {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+.small-line {
+  font-size: 0.8rem;
+  margin: 2px 0;
+}
+.task-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.mini-select {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.task .small {
+  margin-top: 6px;
+}
+.victims {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text);
+}
+.victim-row {
+  display: grid;
+  grid-template-columns: 1.2fr 0.7fr 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+}
+.victim-row input,
+.victim-row select {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 0;
+}
+.four {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.accident-box {
+  border: 1px solid #f2dc9c;
+  background: #fffbeb;
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.score {
+  margin-left: auto;
+  align-self: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  min-width: 26px;
+  text-align: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e6f2f1;
+  color: #0f5a54;
+}
+.line-key {
+  display: inline-block;
+  width: 14px;
+  border-top: 2px dashed #334155;
+}
+
+/* ---- annual report ---- */
+.report-page {
+  max-width: 900px;
+}
+.report-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+}
+.report {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 32px 40px;
+  line-height: 1.5;
+}
+.report h1 {
+  font-size: 1.6rem;
+  margin: 4px 0;
+}
+.report h2 {
+  font-size: 1.05rem;
+  margin: 24px 0 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+.report tr.total td {
+  font-weight: 600;
+  border-top: 2px solid var(--text);
+}
+.report footer {
+  margin-top: 28px;
+}
+
+@media print {
+  .topbar,
+  .no-print {
+    display: none !important;
+  }
+  .shell,
+  .main {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+  body,
+  .page {
+    background: #ffffff;
+  }
+  .report {
+    border: 0;
+    padding: 0;
+  }
+  .report section {
+    break-inside: avoid;
+  }
 }
 
 @media (max-width: 1100px) {

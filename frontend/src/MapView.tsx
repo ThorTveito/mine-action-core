@@ -14,6 +14,8 @@ interface Props {
   terrain: TerrainSettings;
   reports: GeoJSON.FeatureCollection | null; // field reports; null hides the layer
   onViewChange?: (bounds: [number, number, number, number]) => void;
+  areas: GeoJSON.FeatureCollection | null; // admin boundaries; null hides them
+  accidents: GeoJSON.FeatureCollection | null; // staff only; null hides them
 }
 
 export interface TerrainSettings {
@@ -41,6 +43,8 @@ export default function MapView({
   terrain,
   reports,
   onViewChange,
+  areas,
+  accidents,
 }: Props) {
   const onViewRef = useRef(onViewChange);
   onViewRef.current = onViewChange;
@@ -50,8 +54,8 @@ export default function MapView({
   const fitted = useRef(false);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
-  const latest = useRef({ data, visible, selectedId, issues, focus, terrain, reports });
-  latest.current = { data, visible, selectedId, issues, focus, terrain, reports };
+  const latest = useRef({ data, visible, selectedId, issues, focus, terrain, reports, areas, accidents });
+  latest.current = { data, visible, selectedId, issues, focus, terrain, reports, areas, accidents };
   const appliedTerrain = useRef<string>("off");
 
   // Switch 3D terrain on/off. Hazard polygons are draped on the surface automatically.
@@ -74,7 +78,10 @@ export default function MapView({
   const sync = () => {
     const map = mapRef.current;
     if (!map || !loaded.current) return;
-    const { data, visible, selectedId, issues, focus, terrain, reports } = latest.current;
+    const { data, visible, selectedId, issues, focus, terrain, reports, areas, accidents } = latest.current;
+    const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+    (map.getSource("areas") as maplibregl.GeoJSONSource | undefined)?.setData(areas ?? empty);
+    (map.getSource("accidents") as maplibregl.GeoJSONSource | undefined)?.setData(accidents ?? empty);
     (map.getSource(REPORTS) as maplibregl.GeoJSONSource | undefined)?.setData(
       reports ?? { type: "FeatureCollection", features: [] },
     );
@@ -156,6 +163,13 @@ export default function MapView({
         layout: { visibility: "none" },
         paint: { "hillshade-exaggeration": 0.6, "hillshade-shadow-color": "#3b4252" },
       });
+      map.addSource("areas", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      map.addLayer({
+        id: "areas-line",
+        type: "line",
+        source: "areas",
+        paint: { "line-color": "#334155", "line-width": 1.5, "line-dasharray": [3, 2], "line-opacity": 0.7 },
+      });
       map.addSource(SOURCE, {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -225,6 +239,32 @@ export default function MapView({
           "circle-stroke-width": 2,
         },
       });
+      map.addSource("accidents", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      map.addLayer({
+        id: "accidents-circle",
+        type: "circle",
+        source: "accidents",
+        paint: {
+          "circle-radius": ["+", 4, ["*", 1.5, ["+", ["get", "killed"], ["get", "injured"]]]],
+          "circle-color": "#eb6834",
+          "circle-opacity": 0.85,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5,
+        },
+      });
+      map.on("click", "accidents-circle", (e) => {
+        const f = e.features?.[0];
+        if (!f || f.geometry.type !== "Point") return;
+        const p = f.properties as { code: string; occurred_on: string; killed: number; injured: number };
+        const box = document.createElement("div");
+        box.className = "popup";
+        const title = document.createElement("strong");
+        title.textContent = p.code;
+        const meta = document.createElement("div");
+        meta.textContent = `${p.occurred_on} · ${p.killed} killed, ${p.injured} injured`;
+        box.append(title, meta);
+        new maplibregl.Popup().setLngLat(f.geometry.coordinates as [number, number]).setDOMContent(box).addTo(map);
+      });
       map.on("click", "reports-circle", (e) => {
         const f = e.features?.[0];
         if (!f || f.geometry.type !== "Point") return;
@@ -250,7 +290,7 @@ export default function MapView({
         onSelectRef.current(id ?? null);
       });
       map.on("click", (e) => {
-        if (map.queryRenderedFeatures(e.point, { layers: ["hazards-fill", "issues-circle", "reports-circle"] }).length === 0) {
+        if (map.queryRenderedFeatures(e.point, { layers: ["hazards-fill", "issues-circle", "reports-circle", "accidents-circle"] }).length === 0) {
           onSelectRef.current(null);
         }
       });
@@ -269,7 +309,7 @@ export default function MapView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(sync, [data, visible, selectedId, issues, terrain.enabled, terrain.exaggeration, reports]);
+  useEffect(sync, [data, visible, selectedId, issues, terrain.enabled, terrain.exaggeration, reports, areas, accidents]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -1,7 +1,7 @@
 export type HazardStatus = "suspected" | "confirmed" | "in_clearance" | "released" | "cancelled";
 export type HazardType = "SHA" | "CHA";
 export type TaskStatus = "planned" | "active" | "suspended" | "completed" | "cancelled";
-export type TaskType = "survey" | "clearance" | "verification";
+export type TaskType = "survey" | "technical_survey" | "clearance" | "verification";
 
 export interface HazardProperties {
   id: number;
@@ -43,6 +43,7 @@ export interface ClearanceRecord {
   task_id: number;
   record_date: string;
   area_cleared_m2: number;
+  release_method: ReleaseMethod;
   items_found: number;
   items_destroyed: number;
   team: string;
@@ -122,6 +123,11 @@ export interface Dashboard {
   };
   data_quality: { errors: number; warnings: number; by_rule: Record<string, number> };
   recent_activity: ActivityItem[];
+  outstanding_area_m2: number;
+  land_release: LandRelease;
+  casualties: Casualties;
+  risk_education: RiskEducationSummary;
+  top_priorities: Priority[];
   contaminated_area_m2: number;
   remaining_area_m2: number;
   released_area_m2: number;
@@ -307,4 +313,147 @@ export interface ReportDecision {
   report: FieldReport;
   hazard_id: number | null;
   warnings: string[];
+}
+
+// ---- land release, casualties, risk education, priorities, report -------------------
+
+export type ReleaseMethod = "cancelled" | "reduced" | "cleared";
+
+export interface LandRelease {
+  cancelled_m2: number;
+  reduced_m2: number;
+  cleared_m2: number;
+  total_m2: number;
+  items_found: number;
+  items_destroyed: number;
+  by_year: { year: number; cancelled: number; reduced: number; cleared: number; items_destroyed: number }[];
+}
+
+export interface Casualties {
+  accidents: number;
+  casualties: number;
+  killed: number;
+  injured: number;
+  deminers: number;
+  by_sex: Record<string, number>;
+  by_age_group: Record<string, number>;
+  sadd: Record<string, number>;
+  by_activity: Record<string, number>;
+  by_year: { year: number; accidents: number; killed: number; injured: number }[];
+}
+
+export interface RiskEducationSummary {
+  sessions: number;
+  girls: number;
+  boys: number;
+  women: number;
+  men: number;
+  total: number;
+  by_year: { year: number; sessions: number; people: number }[];
+}
+
+export interface PriorityComponent {
+  factor: number;
+  value: unknown;
+  points: number;
+  why: string;
+}
+
+export interface Priority {
+  rank: number;
+  hazard_id: number;
+  code: string;
+  name: string;
+  region: string;
+  status: HazardStatus;
+  hazard_class: string;
+  area_m2: number;
+  score: number;
+  components: Record<string, PriorityComponent>;
+}
+
+export type Sex = "female" | "male" | "unknown";
+export type VictimOutcome = "killed" | "injured";
+export type AccidentActivity =
+  | "farming"
+  | "herding"
+  | "travelling"
+  | "collecting"
+  | "playing"
+  | "handling"
+  | "demining"
+  | "other"
+  | "unknown";
+
+export interface VictimInput {
+  sex: Sex;
+  age: number | null;
+  outcome: VictimOutcome;
+  is_deminer: boolean;
+}
+
+export interface Accident {
+  id: number;
+  code: string;
+  occurred_on: string;
+  lon: number;
+  lat: number;
+  region: string | null;
+  item_category: ItemCategory | null;
+  activity: AccidentActivity;
+  description: string;
+  hazard_id: number | null;
+  hazard_code: string | null;
+  field_report_id: number | null;
+  recorded_by: string;
+  killed: number;
+  injured: number;
+  victims: (VictimInput & { id: number })[];
+}
+
+export interface RiskEducationSession {
+  id: number;
+  code: string;
+  held_on: string;
+  lon: number;
+  lat: number;
+  region: string | null;
+  organisation: string;
+  girls: number;
+  boys: number;
+  women: number;
+  men: number;
+  total: number;
+  notes: string | null;
+}
+
+export interface RegionSnapshot {
+  region: string;
+  open_hazards: number;
+  outstanding_m2: number;
+  cancelled_m2: number;
+  reduced_m2: number;
+  cleared_m2: number;
+}
+
+export interface AnnualReport {
+  year: number;
+  country: string;
+  generated_at: string;
+  open_hazards: number;
+  outstanding_m2: number;
+  regions: RegionSnapshot[];
+  land_release: LandRelease;
+  casualties: Casualties;
+  risk_education: RiskEducationSummary;
+  qa: { inspections: number; passed: number; failed: number; pass_rate: number | null; residual_items: number };
+}
+
+export interface AdminAreaProps {
+  id: number;
+  name: string;
+  code: string;
+  area_m2: number;
+  open_hazards: number;
+  contaminated_m2: number;
 }

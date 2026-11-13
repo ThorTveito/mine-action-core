@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   createInspection,
+  createRecord,
+  createTask,
   fetchAudit,
+  fetchPriorities,
+  updateTask,
   fetchInspections,
   fetchRecords,
   fetchTasks,
@@ -16,10 +20,29 @@ import type {
   ClearanceRecord,
   HazardProperties,
   HazardStatus,
+  Priority,
   QaInspection,
+  ReleaseMethod,
   Task,
+  TaskStatus,
+  TaskType,
   TopologyIssue,
 } from "./types";
+import { RELEASE_COLOR, RELEASE_LABEL, RELEASE_ORDER } from "./viz";
+
+export const TASK_LABEL: Record<TaskType, string> = {
+  survey: "Non-technical survey",
+  technical_survey: "Technical survey",
+  clearance: "Clearance",
+  verification: "Verification",
+};
+const RELEASES: Partial<Record<TaskType, ReleaseMethod>> = {
+  survey: "cancelled",
+  technical_survey: "reduced",
+  clearance: "cleared",
+};
+const TASK_STATUSES: TaskStatus[] = ["planned", "active", "suspended", "completed", "cancelled"];
+const ORGANISATIONS = ["Karvonian Demining Authority", "Northgate Clearance", "Delta Mine Action NGO"];
 
 // UI hint mirroring ALLOWED_TRANSITIONS in backend/app/rules.py; the API is the authority.
 const NEXT_STATUS: Record<HazardStatus, HazardStatus[]> = {
@@ -166,18 +189,51 @@ function InspectionForm({ task, onSaved }: { task: Task; onSaved: () => void }) 
 
 function TaskBlock({ task, onChanged }: { task: TaskDetail; onChanged: () => void }) {
   const { can } = useAuth();
-  const cleared = task.records.reduce((sum, r) => sum + r.area_cleared_m2, 0);
-  const inspectable = task.task_type === "clearance" && ["active", "completed"].includes(task.status);
+  const [error, setError] = useState<string | null>(null);
+  const released = task.records.reduce((sum, r) => sum + r.area_cleared_m2, 0);
+  const inspectable =
+    ["clearance", "technical_survey"].includes(task.task_type) && ["active", "completed"].includes(task.status);
+  const method = RELEASES[task.task_type];
+  const setStatus = async (status: TaskStatus) => {
+    setError(null);
+    try {
+      await updateTask(task.id, { status });
+      onChanged();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
   return (
     <div className="task">
-      <strong>{task.task_type}</strong> · {task.status}
-      <div className="muted">
-        {task.code} · {task.organisation}
+      <div className="task-head">
+        <span>
+          <strong>{TASK_LABEL[task.task_type]}</strong>
+          <span className="muted"> · {task.code}</span>
+        </span>
+        {can("write") ? (
+          <select className="mini-select" value={task.status} onChange={(e) => void setStatus(e.target.value as TaskStatus)} aria-label="Task status">
+            {TASK_STATUSES.map((st) => (
+              <option key={st} value={st}>
+                {st}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="badge">{task.status}</span>
+        )}
       </div>
-      {task.records.length > 0 && (
+      <div className="muted">{task.organisation}</div>
+      {error && <p className="error">{error}</p>}
+      {task.records.length > 0 && method && (
         <div className="muted">
-          {task.records.length} records · {fmtArea(cleared)} cleared
+          <span className="swatch" style={{ background: RELEASE_COLOR[method] }} />
+          {task.records.length} records · {fmtArea(released)} {method}
+          {task.records.some((r) => r.items_found > 0) &&
+            ` · ${task.records.reduce((n, r) => n + r.items_destroyed, 0)} items destroyed`}
         </div>
+      )}
+      {can("write") && method && ["active", "planned"].includes(task.status) && (
+        <ProgressForm task={task} onSaved={onChanged} />
       )}
       {task.inspections.map((i) => (
         <div key={i.id} className="muted">
@@ -187,6 +243,181 @@ function TaskBlock({ task, onChanged }: { task: TaskDetail; onChanged: () => voi
         </div>
       ))}
       {inspectable && can("qa") && <InspectionForm task={task} onSaved={onChanged} />}
+    </div>
+  );
+}
+
+function ReleaseProgress({ area, tasks }: { area: number; tasks: TaskDetail[] }) {
+  const by: Record<ReleaseMethod, number> = { cancelled: 0, reduced: 0, cleared: 0 };
+  for (const t of tasks) for (const r of t.records) by[r.release_method] += r.area_cleared_m2;
+  const released = by.cancelled + by.reduced + by.cleared;
+  if (released === 0) return <p className="muted">No land released yet.</p>;
+  return (
+    <div>
+      <div className="stack small gapped" role="img" aria-label="Land released by method">
+        {RELEASE_ORDER.map((m) =>
+          by[m] > 0 ? <div key={m} style={{ width: `${(100 * by[m]) / area}%`, background: RELEASE_COLOR[m] }} /> : null,
+        )}
+      </div>
+      <div className="legend-row compact">
+        {RELEASE_ORDER.filter((m) => by[m] > 0).map((m) => (
+          <span key={m}>
+            <span className="swatch" style={{ background: RELEASE_COLOR[m] }} />
+            {RELEASE_LABEL[m].split(" (")[0]} {fmtArea(by[m])}
+          </span>
+        ))}
+        <span className="muted">{Math.round((100 * released) / area)}% of {fmtArea(area)}</span>
+      </div>
+    </div>
+  );
+}
+
+function PriorityCard({ p }: { p: Priority }) {
+  return (
+    <div className="priority-card">
+      <div>
+        <span className="big">{p.score.toFixed(0)}</span>
+        <span className="muted"> / 100 priority score</span>
+      </div>
+      {Object.entries(p.components).map(([k, c]) => (
+        <div key={k} className="muted small-line">
+          <strong>{c.points.toFixed(1)}</strong> · {c.why}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AddTaskForm({ hazardId, onSaved }: { hazardId: number; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [type, setType] = useState<TaskType>("survey");
+  const [org, setOrg] = useState(ORGANISATIONS[0]);
+  const [start, setStart] = useState(today());
+  const [error, setError] = useState<string | null>(null);
+  if (!open)
+    return (
+      <button className="small" onClick={() => setOpen(true)}>
+        + Add task
+      </button>
+    );
+  const save = async () => {
+    setError(null);
+    try {
+      await createTask({ hazard_id: hazardId, task_type: type, organisation: org, planned_start: start, status: "planned" });
+      setOpen(false);
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  return (
+    <div className="inline-form">
+      <label>
+        Task
+        <select value={type} onChange={(e) => setType(e.target.value as TaskType)}>
+          {(Object.keys(TASK_LABEL) as TaskType[]).map((t) => (
+            <option key={t} value={t}>
+              {TASK_LABEL[t]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Organisation
+        <input list="orgs" value={org} onChange={(e) => setOrg(e.target.value)} />
+        <datalist id="orgs">
+          {ORGANISATIONS.map((o) => (
+            <option key={o} value={o} />
+          ))}
+        </datalist>
+      </label>
+      <label>
+        Planned start
+        <input type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+      </label>
+      {error && <p className="error">{error}</p>}
+      <div className="actions">
+        <button className="primary small" disabled={!org.trim()} onClick={save}>
+          Add
+        </button>
+        <button className="small" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ProgressForm({ task, onSaved }: { task: Task; onSaved: () => void }) {
+  const method = RELEASES[task.task_type];
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState(today());
+  const [area, setArea] = useState("");
+  const [found, setFound] = useState("0");
+  const [destroyed, setDestroyed] = useState("0");
+  const [team, setTeam] = useState("Team Alpha");
+  const [error, setError] = useState<string | null>(null);
+  if (!method) return null;
+  if (!open)
+    return (
+      <button className="small" onClick={() => setOpen(true)}>
+        + Record land released
+      </button>
+    );
+  const save = async () => {
+    setError(null);
+    try {
+      await createRecord({
+        task_id: task.id,
+        record_date: date,
+        area_cleared_m2: Number(area) || 0,
+        items_found: Number(found) || 0,
+        items_destroyed: Number(destroyed) || 0,
+        team,
+      });
+      setOpen(false);
+      setArea("");
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  return (
+    <div className="inline-form">
+      <p className="muted small-line">
+        Recorded as <strong>{RELEASE_LABEL[method]}</strong>
+      </p>
+      <label>
+        Date
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </label>
+      <label>
+        Area released (m²)
+        <input type="number" min="0" inputMode="decimal" value={area} onChange={(e) => setArea(e.target.value)} />
+      </label>
+      <div className="two">
+        <label>
+          Items found
+          <input type="number" min="0" value={found} onChange={(e) => setFound(e.target.value)} />
+        </label>
+        <label>
+          Destroyed
+          <input type="number" min="0" value={destroyed} onChange={(e) => setDestroyed(e.target.value)} />
+        </label>
+      </div>
+      <label>
+        Team
+        <input value={team} onChange={(e) => setTeam(e.target.value)} />
+      </label>
+      {error && <p className="error">{error}</p>}
+      <div className="actions">
+        <button className="primary small" disabled={!area || !team.trim()} onClick={save}>
+          Save
+        </button>
+        <button className="small" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
@@ -214,7 +445,9 @@ export default function HazardDetail({
   const [tasks, setTasks] = useState<TaskDetail[] | null>(null);
   const [history, setHistory] = useState<AuditEntry[] | null>(null);
   const [issues, setIssues] = useState<TopologyIssue[] | null>(null);
+  const [priority, setPriority] = useState<Priority | null>(null);
   const [version, setVersion] = useState(0);
+  const { can } = useAuth();
 
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
   const changed = useCallback(() => {
@@ -233,7 +466,7 @@ export default function HazardDetail({
           list.map(async (t) => ({
             ...t,
             records: await fetchRecords(t.id),
-            inspections: t.task_type === "clearance" ? await fetchInspections(t.id) : [],
+            inspections: ["clearance", "technical_survey"].includes(t.task_type) ? await fetchInspections(t.id) : [],
           })),
         ),
       )
@@ -242,6 +475,9 @@ export default function HazardDetail({
     fetchAudit("hazard", hazard.id)
       .then((h) => !cancelled && setHistory(h))
       .catch(() => !cancelled && setHistory([]));
+    fetchPriorities({ hazardId: hazard.id })
+      .then((p) => !cancelled && setPriority(p[0] ?? null))
+      .catch(() => !cancelled && setPriority(null));
     fetchTopology({ hazardId: hazard.id })
       .then((r) => !cancelled && setIssues(r.issues))
       .catch(() => !cancelled && setIssues([]));
@@ -271,10 +507,21 @@ export default function HazardDetail({
       </dl>
       <StatusControl hazard={hazard} onChanged={changed} />
 
-      <h3>Tasks, clearance and QA</h3>
+      {priority && (
+        <>
+          <h3>Priority</h3>
+          <PriorityCard p={priority} />
+        </>
+      )}
+
+      <h3>Land release</h3>
+      {tasks ? <ReleaseProgress area={hazard.area_m2} tasks={tasks} /> : <p className="muted">Loading…</p>}
+
+      <h3>Tasks and QA</h3>
       {tasks === null && <p className="muted">Loading…</p>}
       {tasks?.length === 0 && <p className="muted">No tasks recorded.</p>}
       {tasks?.map((t) => <TaskBlock key={t.id} task={t} onChanged={changed} />)}
+      {can("write") && <AddTaskForm hazardId={hazard.id} onSaved={changed} />}
 
       <h3>Spatial checks</h3>
       {issues === null ? <p className="muted">Checking…</p> : <TopologyList issues={issues} />}

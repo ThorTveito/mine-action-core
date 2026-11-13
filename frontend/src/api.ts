@@ -1,5 +1,7 @@
 import { getToken, setToken } from "./auth";
 import type {
+  Accident,
+  AnnualReport,
   AuditEntry,
   ClearanceRecord,
   Dashboard,
@@ -11,10 +13,17 @@ import type {
   ImportReport,
   Meta,
   NearbyHazard,
+  Priority,
   QaInspection,
   QaInspectionInput,
   ReportDecision,
   ReportStatus,
+  RiskEducationSession,
+  TaskStatus,
+  TaskType,
+  VictimInput,
+  AccidentActivity,
+  ItemCategory,
   Stats,
   Task,
   TopologyClusters,
@@ -120,7 +129,70 @@ export const fetchNearby = (reportId: number, radiusM = 500) =>
   request<NearbyHazard[]>(`/field-reports/${reportId}/nearby?radius_m=${radiusM}`);
 export const acceptReport = (
   reportId: number,
-  body: { mode: "new_hazard" | "link"; hazard_id?: number; radius_m?: number; name?: string },
+  body: {
+    mode: "new_hazard" | "link" | "accident";
+    hazard_id?: number;
+    radius_m?: number;
+    name?: string;
+    victims?: VictimInput[];
+    activity?: AccidentActivity;
+  },
 ) => request<ReportDecision>(`/field-reports/${reportId}/accept`, json("POST", body));
 export const rejectReport = (reportId: number, reason: string) =>
   request<ReportDecision>(`/field-reports/${reportId}/reject`, json("POST", { reason }));
+
+// --- tasks and land release
+export const createTask = (body: {
+  hazard_id: number;
+  task_type: TaskType;
+  organisation: string;
+  status?: TaskStatus;
+  planned_start?: string | null;
+  planned_end?: string | null;
+}) => request<Task>("/tasks", json("POST", body));
+export const updateTask = (taskId: number, body: { status?: TaskStatus }) =>
+  request<Task>(`/tasks/${taskId}`, json("PATCH", body));
+export const createRecord = (body: {
+  task_id: number;
+  record_date: string;
+  area_cleared_m2: number;
+  items_found: number;
+  items_destroyed: number;
+  team: string;
+  notes?: string | null;
+}) => request<ClearanceRecord>("/clearance-records", json("POST", body));
+
+// --- priorities, areas, report
+export const fetchPriorities = (opts: { region?: string; hazardId?: number } = {}) => {
+  const q = new URLSearchParams();
+  if (opts.region) q.set("region", opts.region);
+  if (opts.hazardId !== undefined) q.set("hazard_id", String(opts.hazardId));
+  return request<Priority[]>(`/priorities?${q}`);
+};
+export const fetchAdminAreas = () => request<GeoJSON.FeatureCollection>("/admin-areas");
+export const fetchAnnualReport = (year: number) => request<AnnualReport>(`/reports/annual?year=${year}`);
+
+// --- accidents and risk education
+export const fetchAccidents = () => request<Accident[]>("/accidents");
+export const fetchAccidentsGeojson = () => request<GeoJSON.FeatureCollection>("/accidents/geojson");
+export const createAccident = (body: {
+  occurred_on: string;
+  lon: number;
+  lat: number;
+  item_category: ItemCategory | null;
+  activity: AccidentActivity;
+  description: string;
+  victims: VictimInput[];
+}) => request<Accident>("/accidents", json("POST", body));
+export const fetchSessions = () => request<RiskEducationSession[]>("/risk-education");
+export const createSession = (body: {
+  held_on: string;
+  lon: number;
+  lat: number;
+  organisation: string;
+  girls: number;
+  boys: number;
+  women: number;
+  men: number;
+  notes: string | null;
+}) => request<RiskEducationSession>("/risk-education", json("POST", body));

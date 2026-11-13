@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchFieldReportsGeojson, fetchHazards, fetchStats, fetchTopology } from "./api";
+import {
+  fetchAccidentsGeojson,
+  fetchAdminAreas,
+  fetchFieldReportsGeojson,
+  fetchHazards,
+  fetchPriorities,
+  fetchStats,
+  fetchTopology,
+} from "./api";
 import { useAuth } from "./AuthContext";
 import HazardDetail from "./HazardDetail";
-import ItemList from "./ItemList";
+import ItemList, { bboxOf } from "./ItemList";
 import MapView from "./MapView";
 import { STATUS_COLOR, STATUS_LABEL, STATUS_ORDER } from "./status";
 import type {
@@ -21,6 +29,11 @@ export default function MapPage({ focus }: { focus: MapFocus | null }) {
   const [showReports, setShowReports] = useState(true);
   const [mapFocus, setMapFocus] = useState<MapFocus | null>(focus);
   const [view, setView] = useState<[number, number, number, number] | null>(null);
+  const [areas, setAreas] = useState<GeoJSON.FeatureCollection | null>(null);
+  const [showAreas, setShowAreas] = useState(true);
+  const [accidents, setAccidents] = useState<GeoJSON.FeatureCollection | null>(null);
+  const [showAccidents, setShowAccidents] = useState(false);
+  const [scores, setScores] = useState<Map<number, number>>(new Map());
   const [data, setData] = useState<HazardCollection | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,9 +54,36 @@ export default function MapPage({ focus }: { focus: MapFocus | null }) {
     fetchTopology()
       .then((r) => setIssues(r.issues))
       .catch(() => setIssues(null));
+    fetchPriorities()
+      .then((ps) => setScores(new Map(ps.map((p) => [p.hazard_id, p.score]))))
+      .catch(() => setScores(new Map()));
+  }, []);
+
+  useEffect(() => {
+    fetchAdminAreas()
+      .then(setAreas)
+      .catch(() => setAreas(null));
   }, []);
 
   useEffect(load, [load]);
+
+  const staff = can("view_reports");
+  useEffect(() => {
+    if (!staff) {
+      setAccidents(null);
+      return;
+    }
+    fetchAccidentsGeojson()
+      .then(setAccidents)
+      .catch(() => setAccidents(null));
+  }, [staff, user]);
+
+  // A focus that names only a hazard (e.g. from the dashboard) zooms to that hazard's extent.
+  useEffect(() => {
+    if (!focus || focus.hazardId === undefined || focus.bounds || focus.lon !== undefined || !data) return;
+    const f = data.features.find((x) => x.properties.id === focus.hazardId);
+    if (f) setMapFocus({ ...focus, bounds: bboxOf(f.geometry.coordinates) });
+  }, [focus, data]);
 
   useEffect(() => {
     if (!seesReports) {
@@ -129,6 +169,19 @@ export default function MapPage({ focus }: { focus: MapFocus | null }) {
               {issues === null ? "" : `${errorCount} errors · ${warningCount} warnings`}
             </span>
           </label>
+          <label className="legend">
+            <input type="checkbox" checked={showAreas} onChange={(e) => setShowAreas(e.target.checked)} />
+            <span className="line-key" />
+            Administrative boundaries
+          </label>
+          {staff && (
+            <label className="legend">
+              <input type="checkbox" checked={showAccidents} onChange={(e) => setShowAccidents(e.target.checked)} />
+              <span className="dot" style={{ background: "#eb6834" }} />
+              Accidents
+              <span className="muted count">{accidents ? accidents.features.length : ""}</span>
+            </label>
+          )}
           {seesReports && (
             <label className="legend">
               <input type="checkbox" checked={showReports} onChange={(e) => setShowReports(e.target.checked)} />
@@ -155,6 +208,7 @@ export default function MapPage({ focus }: { focus: MapFocus | null }) {
             view={view}
             selectedId={selectedId}
             onPick={pick}
+            scores={scores}
           />
         )}
 
@@ -190,6 +244,8 @@ export default function MapPage({ focus }: { focus: MapFocus | null }) {
         onViewChange={setView}
         terrain={{ enabled: terrain3d, exaggeration }}
         reports={showReports ? reports : null}
+        areas={showAreas ? areas : null}
+        accidents={showAccidents ? accidents : null}
       />
     </div>
   );
